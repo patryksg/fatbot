@@ -365,6 +365,33 @@ class _RecentURLs:
             return False
 
 
+class _RateLimiter:
+    """Throttle title posts. Per-nick cooldown + per-channel window cap."""
+    def __init__(self, nick_cooldown=20.0, chan_window=30.0, chan_max=3):
+        self._nick_cooldown = nick_cooldown
+        self._chan_window = chan_window
+        self._chan_max = chan_max
+        self._lock = threading.Lock()
+        self._nick_last = {}
+        self._chan_hits = {}
+
+    def allow(self, channel, nick):
+        now = time.monotonic()
+        with self._lock:
+            last = self._nick_last.get((channel, nick), 0.0)
+            if now - last < self._nick_cooldown:
+                return False
+            hits = [t for t in self._chan_hits.get(channel, ())
+                    if now - t < self._chan_window]
+            if len(hits) >= self._chan_max:
+                self._chan_hits[channel] = hits
+                return False
+            hits.append(now)
+            self._chan_hits[channel] = hits
+            self._nick_last[(channel, nick)] = now
+            return True
+
+
 class Title(callbacks.Plugin):
     """Posts the HTML <title> of URLs mentioned in channel.
 
@@ -376,6 +403,7 @@ class Title(callbacks.Plugin):
     def __init__(self, irc):
         super().__init__(irc)
         self._recent = _RecentURLs(ttl=60)
+        self._rate = _RateLimiter(nick_cooldown=20.0, chan_window=30.0, chan_max=3)
         if not _HAVE_CURLCFFI:
             self.log.warning(
                 "Title: curl_cffi not available; fetches will return None. "
@@ -415,6 +443,10 @@ class Title(callbacks.Plugin):
         if skip_re and skip_re.search(url):
             return
         if self._recent.seen(channel, url):
+            return
+        if not self._rate.allow(channel, msg.nick):
+            self.log.info(
+                "Title: rate-limited %s in %s (url=%s)", msg.nick, channel, url)
             return
         threading.Thread(
             target=self._do_fetch, args=(irc, channel, url),
