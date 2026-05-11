@@ -6,12 +6,12 @@ import supybot.schedule as schedule
 import supybot.world as world
 
 MSG = "hamsters don't MAKE errors"
-CHANNEL = "#fatkids"
+CHANNEL = "#yourchannel"
 MIN_DELAY = 300
 MAX_DELAY = 21600
 
 class Hamster(callbacks.Plugin):
-    """Randomly says hamsters don't MAKE errors in #fatkids."""
+    """Randomly says hamsters don't MAKE errors in #yourchannel."""
 
     def __init__(self, irc):
         super().__init__(irc)

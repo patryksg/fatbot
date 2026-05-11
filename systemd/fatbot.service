@@ -1,0 +1,24 @@
+[Unit]
+Description=Limnoria IRC bot (fatbot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fatbot
+Group=fatbot
+WorkingDirectory=/home/botuser/runbot
+ExecStart=/home/botuser/.local/bin/supybot /home/botuser/runbot/fatbot.conf
+Restart=always
+RestartSec=10s
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/botuser/runbot
+
+[Install]
+WantedBy=multi-user.target

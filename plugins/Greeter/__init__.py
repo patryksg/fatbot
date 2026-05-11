@@ -1,4 +1,4 @@
-"""Greets registered users when they join #fatkids."""
+"""Greets registered users when they join #yourchannel."""
 import supybot
 import supybot.world as world
 from . import config

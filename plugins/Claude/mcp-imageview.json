@@ -1,1 +1,1 @@
-{"mcpServers":{"imageview":{"command":"/home/fatbot/.local/share/pipx/venvs/limnoria/bin/python","args":["/home/fatbot/runbot/plugins/Claude/mcp_imageview.py"]}}}
+{"mcpServers":{"imageview":{"command":"/home/botuser/.local/share/pipx/venvs/limnoria/bin/python","args":["/home/botuser/runbot/plugins/Claude/mcp_imageview.py"]}}}

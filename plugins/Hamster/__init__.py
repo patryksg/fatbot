@@ -1,4 +1,4 @@
-"""Randomly posts in #fatkids."""
+"""Randomly posts in #yourchannel."""
 import supybot
 import supybot.world as world
 from . import config

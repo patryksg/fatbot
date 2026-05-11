@@ -10,9 +10,9 @@ from supybot.commands import wrap
 
 CAPABILITY = "claude"
 
-CLAUDE_BIN = "/home/fatbot/.local/bin/claude"
-CONFIG_DIR = "/home/fatbot/runbot/.claude"
-MCP_CONFIG = "/home/fatbot/runbot/plugins/Claude/mcp-imageview.json"
+CLAUDE_BIN = "/home/botuser/.local/bin/claude"
+CONFIG_DIR = "/home/botuser/runbot/.claude"
+MCP_CONFIG = "/home/botuser/runbot/plugins/Claude/mcp-imageview.json"
 MODEL = "claude-haiku-4-5-20251001"
 TIMEOUT_SEC = 60
 MAX_CHARS = 380
@@ -20,8 +20,8 @@ MAX_CHARS = 380
 CONTEXT_TTL_SEC = 360
 CONTEXT_MAX_TURNS = 5
 
-BRAIN_PATH = "/home/fatbot/runbot/fatkidsinfo.md"
-BRAIN_CHANNEL = "#fatkids"
+BRAIN_PATH = "/home/botuser/runbot/fatkidsinfo.md"
+BRAIN_CHANNEL = "#yourchannel"
 BRAIN_MAX_BYTES = 16_000
 
 SYSTEM_PROMPT = (
@@ -311,11 +311,11 @@ class Claude(callbacks.Plugin):
         prompt_input = self._build_input(msg, question, history)
 
         env = {
-            "HOME": "/home/fatbot",
-            "PATH": "/home/fatbot/.local/bin:/usr/bin:/bin",
+            "HOME": "/home/botuser",
+            "PATH": "/home/botuser/.local/bin:/usr/bin:/bin",
             "CLAUDE_CONFIG_DIR": CONFIG_DIR,
-            "XDG_CACHE_HOME": "/home/fatbot/runbot/.cache",
-            "XDG_CONFIG_HOME": "/home/fatbot/runbot/.config",
+            "XDG_CACHE_HOME": "/home/botuser/runbot/.cache",
+            "XDG_CONFIG_HOME": "/home/botuser/runbot/.config",
             "LANG": os.environ.get("LANG", "C.UTF-8"),
         }
         cmd = [

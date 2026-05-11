@@ -6,7 +6,7 @@ import supybot.conf as conf
 from supybot.commands import wrap
 
 class Greeter(callbacks.Plugin):
-    """Greets registered users when they join #fatkids."""
+    """Greets registered users when they join #yourchannel."""
 
     def __init__(self, irc):
         super().__init__(irc)
@@ -25,7 +25,7 @@ class Greeter(callbacks.Plugin):
             json.dump(self.greetings, f, indent=2)
 
     def addgreet(self, irc, msg, args, nick, greeting):
-        """<nick> <greeting> -- Adds a greeting for <nick> when they join #fatkids."""
+        """<nick> <greeting> -- Adds a greeting for <nick> when they join #yourchannel."""
         self.greetings[nick.lower()] = greeting
         self._save()
         irc.replySuccess()
@@ -52,7 +52,7 @@ class Greeter(callbacks.Plugin):
 
     def doJoin(self, irc, msg):
         channel = msg.args[0]
-        if channel.lower() != "#fatkids":
+        if channel.lower() != "#yourchannel":
             return
         if msg.nick == irc.nick:
             return

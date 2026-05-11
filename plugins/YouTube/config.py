@@ -47,7 +47,7 @@ conf.registerChannelValue(YouTube, 'timeout',
     metadata extraction subprocess.""")))
 
 conf.registerChannelValue(YouTube, 'cookiesFile',
-    registry.String('/home/fatbot/runbot/youtube-cookies.txt', _("""Path to
+    registry.String('/home/botuser/runbot/youtube-cookies.txt', _("""Path to
     a Netscape-format cookies.txt for yt-dlp. Required when YouTube blocks
     anonymous metadata requests with 'Sign in to confirm you're not a bot'.
     Empty string disables cookies.""")))

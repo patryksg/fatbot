@@ -1,5 +1,29 @@
+# Live session cookies — NEVER commit these
+*-cookies.txt
+cookies.txt
+
+# Limnoria runtime
 __pycache__/
 *.pyc
 *.bak
 *.bak.*
 *.bak-*
+
+# Bot state — not the example, just the live conf
+fatbot.conf
+fatbot.conf.bak*
+conf/
+data/
+logs/
+backup/
+tmp/
+web/
+
+# Brain / channel digests
+fatkidsinfo.md
+*.md.bak
+
+# Stray dotdirs that the sandbox redirects
+.cache/
+.config/
+.claude/
