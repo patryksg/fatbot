@@ -83,6 +83,11 @@ Relays public chat from `#oldnews` into `#fatkids` in the format `<nick:#oldnews
 
 ---
 
+### Repo
+Replies with the GitHub repository URL for this bot (`!repo`).
+
+---
+
 ## Global dependencies
 
 ```
