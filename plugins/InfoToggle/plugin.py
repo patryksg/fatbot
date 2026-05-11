@@ -4,6 +4,7 @@ import supybot.conf as conf
 import supybot.ircdb as ircdb
 import supybot.ircutils as ircutils
 import supybot.callbacks as callbacks
+import supybot.ircmsgs as ircmsgs
 from supybot.commands import wrap, optional
 
 
@@ -160,7 +161,11 @@ class InfoToggle(callbacks.Plugin):
             ircdb.users.delUser(user.id)
             irc.error("Hostmask " + mask + " already registered to another user.")
             return
-        irc.reply("User '" + nick + "' added with hostmask " + mask + ". Password: " + password)
+        irc.queueMsg(ircmsgs.privmsg(
+            msg.nick,
+            "User '" + nick + "' password: " + password,
+        ))
+        irc.reply("User '" + nick + "' added with hostmask " + mask + ". Password sent via PM.")
 
     adduser = wrap(adduser, ["nick"])
 

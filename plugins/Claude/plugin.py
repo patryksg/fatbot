@@ -341,7 +341,7 @@ class Claude(callbacks.Plugin):
         prompt_input = self._build_input(msg, question, history)
 
         env = {
-            "HOME": "/home/botuser",
+            "HOME": "/home/fatbot",
             "PATH": "/home/botuser/.local/bin:/usr/bin:/bin",
             "CLAUDE_CONFIG_DIR": CONFIG_DIR,
             "XDG_CACHE_HOME": "/home/botuser/runbot/.cache",
