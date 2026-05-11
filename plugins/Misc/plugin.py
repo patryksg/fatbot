@@ -375,16 +375,16 @@ class Misc(callbacks.Plugin):
 
             newest = _(
                 'The newest version available online is %(release_version)s '
-                '(https://pypi.org/project/limnoria/), '
+                '(https://is.gd/nrcYAP), '
                 'or %(git_version)s in Git '
-                '(https://github.com/progval/Limnoria)'
+                '(https://is.gd/ic1HDX)'
             ) % {'release_version': release_version, 'git_version': git_version}
         except utils.web.Error as e:
             self.log.info('Couldn\'t get website version: %s', e)
             newest = _('I couldn\'t fetch the newest version '
                      'from the Limnoria repository.')
         s = _('The current (running) version of this Limnoria is %s. %s. '
-              'This bot runs https://github.com/patryksg/fatbot') % \
+              'This bot runs https://is.gd/1lz3cR') % \
             (conf.version, newest)
         irc.reply(s)
     version = wrap(thread(version))
