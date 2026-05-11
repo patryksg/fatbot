@@ -3,6 +3,8 @@
 > **Fork of [Limnoria](https://github.com/progval/Limnoria)** — the original bot framework by Valentin Lorentz et al.
 > This repo contains the upstream Limnoria core plus custom plugins specific to fatbot.
 
+**[→ Setup guide: Debian Trixie from scratch](https://gist.github.com/patryksg/3584bc2ce12d451e219d87c3d8b85a5a)**
+
 > **⚠️ VIBECODED — USE AT YOUR OWN RISK**
 >
 > This entire codebase was written with AI assistance (Claude Code / Claude Sonnet).
