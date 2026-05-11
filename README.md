@@ -1,5 +1,8 @@
 # fatbot
 
+> **Fork of [Limnoria](https://github.com/progval/Limnoria)** — the original bot framework by Valentin Lorentz et al.
+> This repo contains the upstream Limnoria core plus custom plugins specific to fatbot.
+
 > **⚠️ VIBECODED — USE AT YOUR OWN RISK**
 >
 > This entire codebase was written with AI assistance (Claude Code / Claude Sonnet).
