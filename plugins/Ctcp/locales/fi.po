@@ -1,0 +1,80 @@
+# Ctcp plugin in Limnoria.
+# Copyright (C) 2011-2014 Limnoria
+# Mikaela Suomalainen <mikaela.suomalainen@outlook.com>, 2011-2014
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"POT-Creation-Date: 2022-02-06 00:12+0100\n"
+"PO-Revision-Date: 2014-03-22 16:16+0200\n"
+"Last-Translator: Mikaela Suomalainen <mikaela.suomalainen@outlook.com>\n"
+"Language-Team: \n"
+"Language: fi_FI\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: pygettext.py 1.5\n"
+"X-Generator: Poedit 1.5.4\n"
+
+#: plugin.py:44
+msgid ""
+"\n"
+"    Provides replies to common CTCPs (version, time, etc.), and a command\n"
+"    to fetch version responses from channels.\n"
+"\n"
+"    Please note that the command `ctcp version` cannot receive any responses "
+"if the channel is\n"
+"    mode +C or similar which prevents CTCP requests to channel.\n"
+"    "
+msgstr ""
+
+#: plugin.py:89
+msgid "^PING(?: (.+))?$"
+msgstr "^PING(?: (.+))?$"
+
+#: plugin.py:98
+msgid "^VERSION$"
+msgstr "^VERSION$"
+
+#: plugin.py:103
+msgid "^USERINFO$"
+msgstr "^USERINFO$"
+
+#: plugin.py:108
+msgid "^TIME$"
+msgstr "^TIME$"
+
+#: plugin.py:113
+msgid "^FINGER$"
+msgstr "^FINGER$"
+
+#: plugin.py:116
+msgid "Supybot, the best Python IRC bot in existence!"
+msgstr "Supybot, paras Pythonilla toteutettu IRC-botti, joka on olemassa!"
+
+#: plugin.py:119
+msgid "^SOURCE$"
+msgstr "^SOURCE$"
+
+#: plugin.py:135
+#, fuzzy
+msgid ""
+"[<channel>] [--nicks]\n"
+"\n"
+"        Sends a CTCP VERSION to <channel>, returning the various\n"
+"        version strings returned.  It waits for 10 seconds before returning\n"
+"        the versions received at that point.  If --nicks is given, nicks "
+"are\n"
+"        associated with the version strings; otherwise, only the version\n"
+"        strings are given.\n"
+"        "
+msgstr ""
+"[<kanava>] [--nicks]\n"
+"\n"
+"        Lähettää CTCP VERSION <kanavalle>, palauttaen \n"
+"        palaavat versioketjut.  Se odottaa 10 sekuntia ennen kuin palauttaa\n"
+"        versiot, jotka vastaanotettiin tuolloin.  Jos --nicks on annettu, "
+"nimimerkit\n"
+"        liitetään versioketjuihin; muutoin vain versioketjut\n"
+"        annetaan.\n"
+"        "

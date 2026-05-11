@@ -1,0 +1,132 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR ORGANIZATION
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"POT-Creation-Date: 2024-12-06 11:00+0100\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: pygettext.py 1.5\n"
+
+
+#: plugin.py:53
+#, docstring
+msgid ""
+"Provides commands to work with math, such as a calculator and\n"
+"    a unit converter."
+msgstr ""
+
+#: plugin.py:57
+#, docstring
+msgid ""
+"<fromBase> [<toBase>] <number>\n"
+"\n"
+"        Converts <number> from base <fromBase> to base <toBase>.\n"
+"        If <toBase> is left out, it converts to decimal.\n"
+"        "
+msgstr ""
+
+#: plugin.py:68
+msgid "Invalid <number> for base %s: %s"
+msgstr ""
+
+#: plugin.py:74
+#, docstring
+msgid "Convert a decimal number to another base; returns a string."
+msgstr ""
+
+#: plugin.py:95
+#, docstring
+msgid ""
+"Convert a number from any base, 2 through 36, to any other\n"
+"        base, 2 through 36. Returns a string."
+msgstr ""
+
+#: plugin.py:134
+#, docstring
+msgid ""
+"<math expression>\n"
+"\n"
+"        Returns the value of the evaluated <math expression>.  The syntax is\n"
+"        Python syntax; the type of arithmetic is floating point.  Floating\n"
+"        point arithmetic is used in order to prevent a user from being able to\n"
+"        crash to the bot with something like '10**10**10**10'.  One consequence\n"
+"        is that large values such as '10**24' might not be exact.\n"
+"        "
+msgstr ""
+
+#: plugin.py:148 plugin.py:173
+msgid "The answer exceeded %s or so."
+msgstr ""
+
+#: plugin.py:150 plugin.py:175
+msgid "Invalid syntax: %s"
+msgstr ""
+
+#: plugin.py:152 plugin.py:177
+msgid "%s is not a defined function."
+msgstr ""
+
+#: plugin.py:154
+msgid "Memory error (too much recursion?)"
+msgstr ""
+
+#: plugin.py:161
+#, docstring
+msgid ""
+"<math expression>\n"
+"\n"
+"        This is the same as the calc command except that it allows integer\n"
+"        math, and can thus cause the bot to suck up CPU.  Hence it requires\n"
+"        the 'trusted' capability to use.\n"
+"        "
+msgstr ""
+
+#: plugin.py:198
+#, docstring
+msgid ""
+"<rpn math expression>\n"
+"\n"
+"        Returns the value of an RPN expression.\n"
+"        "
+msgstr ""
+
+#: plugin.py:223
+msgid "Not enough arguments for %s"
+msgstr ""
+
+#: plugin.py:236
+msgid "%q is not a defined function."
+msgstr ""
+
+#: plugin.py:243
+msgid "Stack: [%s]"
+msgstr ""
+
+#: plugin.py:247
+#, docstring
+msgid ""
+"[<number>] <unit> to <other unit>\n"
+"\n"
+"        Converts from <unit> to <other unit>. If number isn't given, it\n"
+"        defaults to 1. For unit information, see 'units' command.\n"
+"        "
+msgstr ""
+
+#: plugin.py:277
+#, docstring
+msgid ""
+" [<type>]\n"
+"\n"
+"        With no arguments, returns a list of measurement types, which can be\n"
+"        passed as arguments. When called with a type as an argument, returns\n"
+"        the units of that type.\n"
+"        "
+msgstr ""
+

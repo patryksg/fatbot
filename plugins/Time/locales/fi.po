@@ -1,0 +1,205 @@
+# Time plugin in Limnoria.
+# Copyright (C) 2011 Limnoria
+# Mikaela Suomalainen <mikaela.suomalainen@outlook.com>, 2011.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Time plugin for Limnoria\n"
+"POT-Creation-Date: 2024-12-06 11:00+0100\n"
+"PO-Revision-Date: 2014-12-20 13:43+0200\n"
+"Last-Translator: Mikaela Suomalainen <mikaela.suomalainen@outlook.com>\n"
+"Language-Team: \n"
+"Language: fi\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: pygettext.py 1.5\n"
+"X-Generator: Poedit 1.6.10\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: config.py:46
+msgid ""
+"Determines the\n"
+"    format string for timestamps.  Refer to the Python documentation for "
+"the\n"
+"    time module to see what formats are accepted. If you set this variable "
+"to\n"
+"    the empty string, the timestamp will not be shown."
+msgstr ""
+"Määrittää\n"
+"    muotoketjun aikaleimoille.  Katso Python documentaatiosta\n"
+"    aikamoduulin kohdalta nähdäksesi, mitkä muodot hyväksytään. Jos asetat "
+"tämän tyhjäksi\n"
+"    merkkiketjuksi, aikaleimaa ei näytetä."
+
+#: plugin.py:82
+msgid "This plugin allows you to use different time-related functions."
+msgstr "Tämä plugini sallii erilaisten aikaan liittyvien funktioiden käytön."
+
+#: plugin.py:85
+msgid ""
+"[<years>y] [<weeks>w] [<days>d] [<hours>h] [<minutes>m] [<seconds>s]\n"
+"\n"
+"        Returns the number of seconds in the number of <years>, <weeks>,\n"
+"        <days>, <hours>, <minutes>, and <seconds> given.  An example usage "
+"is\n"
+"        \"seconds 2h 30m\", which would return 9000, which is '3600*2 + "
+"30*60'.\n"
+"        Useful for scheduling events at a given number of seconds in the\n"
+"        future.\n"
+"        "
+msgstr ""
+"[<vuosia>y] [<viikkoja>w] [<days>d] [<hours>h] [<minutes>m] [<seconds>s]\n"
+"\n"
+"        Palauttaa annettujen <vuosien>, <viikkojen>,\n"
+"        <päivien>, <tuntien>, <minuuttien>, ja <sekuntejen> määrän "
+"sekunteina.  Esimerkki käyttö on\n"
+"        \"seconds 2h 30m\", joka palauttaisi 9000, joka on '3600*2 + "
+"30*60'.\n"
+"        Hyödyllinen ajastamaan tapahtumia annettujen sekuntien päästä\n"
+"        tulevaisuudessa.\n"
+"        "
+
+#: plugin.py:123
+#, fuzzy
+msgid ""
+"[<time string>]\n"
+"\n"
+"        Returns the number of seconds since epoch <time string> is.\n"
+"        <time string> can be any number of natural formats; just try "
+"something\n"
+"        and see if it will work.\n"
+"        If the <time string> is not given, defaults to now.\n"
+"        "
+msgstr ""
+"<aika merkkiketju>\n"
+"\n"
+"        Palauttaa sen määrän sekunteja ajanlaskun alusta, kuin "
+"<aikamerkkiketju> on.\n"
+"        <Aika merkkiketju> voi olla mikä tahansa määrä luonnollisia "
+"muodostelmia; kokeile vain jotakin\n"
+"        ja katso toimiiko se.\n"
+"        "
+
+#: plugin.py:134 plugin.py:151
+msgid ""
+"This command is not available on this bot, ask the owner to install the "
+"python-dateutil library."
+msgstr ""
+"Tämä komento ei ole saatavilla tällä botilla. Pyydä omistajaa asentamaan "
+"python-dateutil sovelluskirjasto."
+
+#: plugin.py:141 plugin.py:160
+msgid "That's right now!"
+msgstr "Se on juuri nyt!"
+
+#: plugin.py:146
+msgid ""
+"<time string>\n"
+"\n"
+"        Returns the number of seconds until <time string>.\n"
+"        "
+msgstr ""
+"<aika merkkiketju>\n"
+"\n"
+"        Palauttaa sekuntien määrän <aika merkkiketjuun>.\n"
+"        "
+
+#: plugin.py:165
+msgid ""
+"[<seconds since epoch>]\n"
+"\n"
+"        Returns the ctime for <seconds since epoch>, or the current ctime "
+"if\n"
+"        no <seconds since epoch> is given.\n"
+"        "
+msgstr ""
+"[<sekunteja ajanlaskun alkamisen jälkeen>]\n"
+"\n"
+"        Palauttaa ctimen <sekunteja ajanlaskun alkamisen jälkeen>, tai "
+"nykyisen ctimen, jos\n"
+"        <sekunteja ajanlaskun alkamisen jälkeen> on annettu.\n"
+"        "
+
+#: plugin.py:171
+msgid "number of seconds since epoch"
+msgstr "sekuntien määrä ajanlaskun alkamisen jälkeen"
+
+#: plugin.py:176
+#, fuzzy
+msgid ""
+"[<channel>] [<format>] [<seconds since epoch>]\n"
+"\n"
+"        Returns the current time in <format> format, or, if <format> is not\n"
+"        given, uses the configurable format for the current channel.  If no\n"
+"        <seconds since epoch> time is given, the current time is used. If\n"
+"        <channel> is given without <format>, uses the format for <channel>.\n"
+"        "
+msgstr ""
+"[<muoto>] [<sekunteja ajanlaskun alkamisen jälkeen>]\n"
+"\n"
+"        Palauttaa nykyisen ajan <muodon> muodossa, tai, jos <format> ei ole "
+"annettu\n"
+"        käyttää muokattavaa muotoa nykyiselle kanavalle.  Jos\n"
+"        <sekunteja ajanlaskun alkamisen jälkeen> ei ole annettu, käytetään "
+"nykyistä aikaa.\n"
+"        "
+
+#: plugin.py:198
+msgid ""
+"<seconds>\n"
+"\n"
+"        Returns a pretty string that is the amount of time represented by\n"
+"        <seconds>.\n"
+"        "
+msgstr ""
+"<sekunteja>\n"
+"\n"
+"        Palauttaa nätin merkkiketjun, joka on <sekunteilla>\n"
+"        esitetty.\n"
+"        "
+
+#: plugin.py:208
+#, fuzzy
+msgid ""
+"<region>/<city> (or <region>/<state>/<city>)\n"
+"\n"
+"        Takes a city and its region, and returns its local time. This\n"
+"        command uses the IANA Time Zone Database."
+msgstr ""
+"<alue>/<kaupunki>\n"
+"\n"
+" Näyttää kaupungin ja sen osan paikallisen ajan. Tämä komento käyttää\n"
+" IANAn aikavyöhyketietokantaa."
+
+#: plugin.py:224
+msgid "Unknown timezone"
+msgstr "Tuntematon aikavyöhyke"
+
+#: plugin.py:226
+msgid ""
+"Timezone-related commands are not available. Your administrator need to "
+"either upgrade Python to version 3.9 or greater, or install pytz."
+msgstr ""
+
+#: plugin.py:239
+msgid ""
+"[<year> <month> <day>]\n"
+"        Returns a the Discordian date today, or an optional different date."
+msgstr ""
+
+#: plugin.py:250
+msgid ""
+"The 'ddate' module is not installed. Use '%s -m pip install --user ddate' or "
+"see %u for more information."
+msgstr ""
+
+#~ msgid ""
+#~ "Python-tz is required by the command, but is not installed on this "
+#~ "computer."
+#~ msgstr ""
+#~ "Python-tz on vaadittu tämän komennon käyttämiseen, mutta se ei ole "
+#~ "asennettuna tälle tietokoneelle."
+
+#~ msgid "A timezone must be in the format region/city."
+#~ msgstr "Aikavyöhykkeen täytyy olla muodossa alue/kaupunki."

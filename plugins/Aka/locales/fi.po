@@ -1,0 +1,368 @@
+# Aka plugin for Limnoria
+# Copyright (C) 2014 Limnoria
+# Mikaela Suomalainen <mikaela.suomalainen@outlook.com>, 2014.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Aka plugin for Limnoria\n"
+"POT-Creation-Date: 2024-12-06 11:00+0100\n"
+"PO-Revision-Date: 2014-12-20 13:57+0200\n"
+"Last-Translator: Mikaela Suomalainen <mikaela.suomalainen@outlook.com>\n"
+"Language-Team: \n"
+"Language: fi\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: pygettext.py 1.5\n"
+"X-Generator: Poedit 1.6.10\n"
+
+#: config.py:55
+msgid ""
+"The maximum number of words allowed in a\n"
+"    command name. Setting this to an high value may slow down your bot\n"
+"    on long commands."
+msgstr ""
+"Komennon nimessä sallittujen merkkien enimmäismäärä.\n"
+" Korkean arvon asettaminen tähän voi hidastaa bottiasi pitkien komentojen "
+"kanssa."
+
+#: config.py:61
+msgid ""
+"Determines whether the Akas will be\n"
+"    browsable through the HTTP server."
+msgstr ""
+
+#: plugin.py:141 plugin.py:274 plugin.py:728
+msgid "This Aka already exists."
+msgstr "Tämä Aka on jo olemassa."
+
+#: plugin.py:170 plugin.py:182 plugin.py:196 plugin.py:301 plugin.py:318
+#: plugin.py:335 plugin.py:908
+msgid "This Aka does not exist."
+msgstr "Tätä Akaa ei ole olemassa."
+
+#: plugin.py:303
+msgid "This Aka is already locked."
+msgstr "Tämä Aka on jo lukittu."
+
+#: plugin.py:320
+msgid "This Aka is already unlocked."
+msgstr "Tämä Aka on jo avattu."
+
+#: plugin.py:465
+#, fuzzy
+msgid "By %s at %s"
+msgstr "Lukinnut %s aikaan %s"
+
+#: plugin.py:501
+msgid ""
+"\n"
+"    This plugin allows users to define aliases to commands and combinations\n"
+"    of commands (via nesting).\n"
+"\n"
+"    Importing from Alias\n"
+"    ^^^^^^^^^^^^^^^^^^^^\n"
+"\n"
+"    Add an aka, Alias, which eases the transitioning to Aka from Alias.\n"
+"\n"
+"    First we will load Alias and Aka::\n"
+"\n"
+"        <jamessan> @load Alias\n"
+"        <bot> jamessan: The operation succeeded.\n"
+"        <jamessan> @load Aka\n"
+"        <bot> jamessan: The operation succeeded.\n"
+"\n"
+"    Then we import the Alias database to Aka in case it exists and unload\n"
+"    Alias::\n"
+"\n"
+"        <jamessan> @importaliasdatabase\n"
+"        <bot> jamessan: The operation succeeded.\n"
+"        <jamessan> @unload Alias\n"
+"        <bot> jamessan: The operation succeeded.\n"
+"\n"
+"    And now we will finally add the Aka ``alias`` itself::\n"
+"\n"
+"        <jamessan> @aka add \"alias\" \"aka $1 $*\"\n"
+"        <bot> jamessan: The operation succeeded.\n"
+"\n"
+"    Now you can use Aka as you used Alias before.\n"
+"\n"
+"    Trout\n"
+"    ^^^^^\n"
+"\n"
+"    Add an aka, ``trout``, which expects a word as an argument::\n"
+"\n"
+"        <jamessan> @aka add trout \"reply action slaps $1 with a large "
+"trout\"\n"
+"        <bot> jamessan: The operation succeeded.\n"
+"        <jamessan> @trout me\n"
+"        * bot slaps me with a large trout\n"
+"\n"
+"    This ``trout`` aka requires the plugin ``Reply`` to be loaded since it\n"
+"    provides the ``action`` command.\n"
+"\n"
+"    Random percentage\n"
+"    ^^^^^^^^^^^^^^^^^\n"
+"\n"
+"    Add an aka, ``randpercent``, which returns a random percentage value::\n"
+"\n"
+"        @aka add randpercent \"squish [dice 1d100]%\"\n"
+"\n"
+"    This requires the ``Filter`` and ``Games`` plugins to be loaded.\n"
+"\n"
+"    Note that nested commands in an alias should be quoted, or they will "
+"only\n"
+"    run once when you create the alias, and not each time the alias is\n"
+"    called. (In this case, not quoting the nested command would mean that\n"
+"    ``@randpercent`` always responds with the same value!)\n"
+"    "
+msgstr ""
+
+#: plugin.py:695
+msgid "You've attempted more nesting than is currently allowed on this bot."
+msgstr ""
+"Olet yrittänyt sisällyttää enemmän komentoja, kuin tässä botti sallii juuri "
+"nyt."
+
+#: plugin.py:699
+msgid " at least"
+msgstr "ainakin"
+
+#: plugin.py:708
+msgid "Locked by %s at %s"
+msgstr "Lukinnut %s aikaan %s"
+
+#: plugin.py:713
+#, fuzzy
+msgid ""
+"<a global alias,%s %n>\n"
+"\n"
+"Alias for %q.%s"
+msgstr ""
+"<alias,%s %n>\n"
+"\n"
+"Alias komennolle %q.%s"
+
+#: plugin.py:714 plugin.py:718
+msgid "argument"
+msgstr "parametri"
+
+#: plugin.py:717
+#, fuzzy
+msgid ""
+"<an alias on %s,%s %n>\n"
+"\n"
+"Alias for %q.%s"
+msgstr ""
+"<alias,%s %n>\n"
+"\n"
+"Alias komennolle %q.%s"
+
+#: plugin.py:725
+msgid "You can't overwrite commands in this plugin."
+msgstr "Et voi ylikirjoittaa tämän lisä-osan komentoja."
+
+#: plugin.py:730
+msgid "This Aka has too many spaces in its name."
+msgstr "Tämän Akan nimessä on liian monta välilyöntiä."
+
+#: plugin.py:735
+msgid "Can't mix $* and optional args (@1, etc.)"
+msgstr ""
+"$*:ä ja vapaaehtoisia parametrejä (@1, jne.) ei voida sekoittaa keskenään"
+
+#: plugin.py:742
+msgid "This Aka is locked."
+msgstr "Tämä Aka on lukittu."
+
+#: plugin.py:746
+#, fuzzy
+msgid ""
+"[--channel <#channel>] <name> <command>\n"
+"\n"
+"        Defines an alias <name> that executes <command>.  The <command>\n"
+"        should be in the standard \"command argument [nestedcommand "
+"argument]\"\n"
+"        arguments to the alias; they'll be filled with the first, second, "
+"etc.\n"
+"        arguments.  $1, $2, etc. can be used for required arguments.  @1, "
+"@2,\n"
+"        etc. can be used for optional arguments.  $* simply means \"all\n"
+"        arguments that have not replaced $1, $2, etc.\", ie. it will also\n"
+"        include optional arguments.\n"
+"        "
+msgstr ""
+"[--channel <#kanava>] <nimi> <komento>\n"
+"\n"
+"Määrittää aliaksen <nimi>, joka suorittaa <komennon>.  <Komennon>\n"
+" pitäisi olla tavallisessa muodossa \"komento parametri [sisällytettykomento "
+"parametri]\"\n"
+"  parametreinä aliakselle; ne täytetään ensimmäisenä, toisena, jne.\n"
+"  parametreinä.  $1, $2, jne. voidaan käyttää vaadittuina parametreinä.  @1, "
+"@2,\n"
+"  jne. voidaan käyttää vapaaehtoisina parametreinä.  $* tarkoittaa "
+"yksinkertaisesti \"kaikki\n"
+" jotka eivät ole korvanneet $1, $2, jne.\", esim. se sisältää vapaa-ehtoiset "
+"parametrit.\n"
+"        "
+
+#: plugin.py:760 plugin.py:792 plugin.py:823 plugin.py:855 plugin.py:878
+#: plugin.py:901 plugin.py:947 plugin.py:990
+msgid "%r is not a valid channel."
+msgstr "%r ei ole kelvollinen kanava."
+
+#: plugin.py:778
+#, fuzzy
+msgid ""
+"[--channel <#channel>] <name> <command>\n"
+"\n"
+"        Overwrites an existing alias <name> to execute <command> instead.  "
+"The\n"
+"        <command> should be in the standard \"command argument "
+"[nestedcommand\n"
+"        argument]\" arguments to the alias; they'll be filled with the "
+"first,\n"
+"        second, etc. arguments.  $1, $2, etc. can be used for required\n"
+"        arguments.  @1, @2, etc. can be used for optional arguments.  $* "
+"simply\n"
+"        means \"all arguments that have not replaced $1, $2, etc.\", ie. it "
+"will\n"
+"        also include optional arguments.\n"
+"        "
+msgstr ""
+"[--kanava <#kanava>] <nimi> <komento>\n"
+" Ylikirjoittaa olemassa olevan aliaksen <nimi> suorittamaan <komennon> "
+"sensijaan. <Komennon>\n"
+" pitäisi olla standardissa \"komento parametri [sisäkkäinen komento\" "
+"parametreinä aliakselle; ne täytetään\n"
+" ensimmäisillä, toisilla jne. parametreillä. $1, $2, jne. voidaan käyttää "
+"vaadittuihin parametreihin. $*\n"
+" yksinkertaisesti tarkoittaa \"kaikki parametrin, joita ei ole korvattu $1, "
+"$2 jne.\", esimerkiksi. se sisällyttää\n"
+" myös kaikki vapaaehtoiset parametrit."
+
+#: plugin.py:815
+msgid ""
+"[--channel <#channel>] <name>\n"
+"\n"
+"        Removes the given alias, if unlocked.\n"
+"        "
+msgstr ""
+"[--channel <#kanava>] <nimi>\n"
+"\n"
+" Poistaa annetun aliaksen, ellei se ole lukittu.\n"
+"        "
+
+#: plugin.py:837
+msgid ""
+"Check if the user has any of the required capabilities to manage\n"
+"        the regexp database."
+msgstr ""
+"Tarkistaa onko käyttäjällä vaadittu valtuus säännöllisten lausekkeiden\n"
+" tietokannan hallintaan."
+
+#: plugin.py:847
+msgid ""
+"[--channel <#channel>] <alias>\n"
+"\n"
+"        Locks an alias so that no one else can change it.\n"
+"        "
+msgstr ""
+"[--channel <#kanava>] <alias>\n"
+"\n"
+"        Lukitsee aliaksen estäen muita muokkaamasta sitä.\n"
+"        "
+
+#: plugin.py:870
+msgid ""
+"[--channel <#channel>] <alias>\n"
+"\n"
+"        Unlocks an alias so that people can define new aliases over it.\n"
+"        "
+msgstr ""
+"[--channel <#kanava>] <alias>\n"
+"\n"
+" Avaa aliaksen, jotta kaikki voivat määrittää uusia aliaksia sen päälle.\n"
+"        "
+
+#: plugin.py:893
+msgid ""
+"[--channel <#channel>] <alias>\n"
+"\n"
+"        This command shows the content of an Aka.\n"
+"        "
+msgstr ""
+"<komento> <#kanava> <alias>\n"
+"\n"
+" Tämä komento näyttää Akan sisällön."
+
+#: plugin.py:913
+msgid ""
+"takes no arguments\n"
+"\n"
+"        Imports the Alias database into Aka's, and clean the former."
+msgstr ""
+"ei ota parametrejä\n"
+"\n"
+" Tuo Aliaksen tietokannan Akaan ja tyhjentää aiemman."
+
+#: plugin.py:918
+msgid "Alias plugin is not loaded."
+msgstr "Alias lisä-osa ei ole ladattu."
+
+#: plugin.py:929
+msgid "Error occured when importing the %n: %L"
+msgstr "Virhe komennon %n tuomisessa: %L"
+
+#: plugin.py:937
+msgid ""
+"[--channel <#channel>] [--keys] [--unlocked|--locked]\n"
+"\n"
+"        Lists all Akas defined for <channel>. If <channel> is not "
+"specified,\n"
+"        lists all global Akas. If --keys is given, lists only the Aka names\n"
+"        and not their commands."
+msgstr ""
+
+#: plugin.py:956
+msgid "--locked and --unlocked are incompatible options."
+msgstr ""
+
+#: plugin.py:976
+msgid "No Akas found."
+msgstr ""
+
+#: plugin.py:981
+msgid ""
+"[--channel <#channel>] <query>\n"
+"\n"
+"        Searches Akas defined for <channel>. If <channel> is not specified,\n"
+"        searches all global Akas."
+msgstr ""
+
+#: plugin.py:1000
+msgid "No matching Akas were found."
+msgstr ""
+
+#~ msgid ""
+#~ "Aka is the improved version of the Alias plugin. It stores akas outside\n"
+#~ "    of the bot.conf, which doesn't have risk of corrupting the bot.conf "
+#~ "file\n"
+#~ "    (this often happens when there are Unicode issues). Aka also\n"
+#~ "    introduces multi-worded akas."
+#~ msgstr ""
+#~ "Aka on paranneltu versio Alias pluginista. Se tallentaa akat bot.conf-"
+#~ "tiedoston ulkopuolelle, jollla ei ole\n"
+#~ " riskiä korruptoida bot.conf tiedostoa (joka tapahtuu usein Unicode-"
+#~ "ongelmien kanssa). Aka\n"
+#~ " tukee myös useamman akan pituisia akoja."
+
+#~ msgid "There can be only one $* in an alias."
+#~ msgstr "Aliaksessa voi olla vain yksi $*."
+
+#~ msgid ""
+#~ "Add the help for 'plugin help Aka' here\n"
+#~ "    This should describe *how* to use this plugin."
+#~ msgstr ""
+#~ "Lisää ohje komentoa 'plugin help Aka' varten tähän.\n"
+#~ "  Tämän pitäisi kuvata *kuinka* tätä lisä-osaa käytetään."

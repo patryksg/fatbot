@@ -1,0 +1,136 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR ORGANIZATION
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"POT-Creation-Date: 2024-12-06 11:00+0100\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: pygettext.py 1.5\n"
+
+
+#: config.py:46
+msgid ""
+"Determines the\n"
+"    format string for timestamps.  Refer to the Python documentation for the\n"
+"    time module to see what formats are accepted. If you set this variable to\n"
+"    the empty string, the timestamp will not be shown."
+msgstr ""
+
+#: plugin.py:82
+#, docstring
+msgid "This plugin allows you to use different time-related functions."
+msgstr ""
+
+#: plugin.py:85
+#, docstring
+msgid ""
+"[<years>y] [<weeks>w] [<days>d] [<hours>h] [<minutes>m] [<seconds>s]\n"
+"\n"
+"        Returns the number of seconds in the number of <years>, <weeks>,\n"
+"        <days>, <hours>, <minutes>, and <seconds> given.  An example usage is\n"
+"        \"seconds 2h 30m\", which would return 9000, which is '3600*2 + 30*60'.\n"
+"        Useful for scheduling events at a given number of seconds in the\n"
+"        future.\n"
+"        "
+msgstr ""
+
+#: plugin.py:123
+#, docstring
+msgid ""
+"[<time string>]\n"
+"\n"
+"        Returns the number of seconds since epoch <time string> is.\n"
+"        <time string> can be any number of natural formats; just try something\n"
+"        and see if it will work.\n"
+"        If the <time string> is not given, defaults to now.\n"
+"        "
+msgstr ""
+
+#: plugin.py:134 plugin.py:151
+msgid "This command is not available on this bot, ask the owner to install the python-dateutil library."
+msgstr ""
+
+#: plugin.py:141 plugin.py:160
+msgid "That's right now!"
+msgstr ""
+
+#: plugin.py:146
+#, docstring
+msgid ""
+"<time string>\n"
+"\n"
+"        Returns the number of seconds until <time string>.\n"
+"        "
+msgstr ""
+
+#: plugin.py:165
+#, docstring
+msgid ""
+"[<seconds since epoch>]\n"
+"\n"
+"        Returns the ctime for <seconds since epoch>, or the current ctime if\n"
+"        no <seconds since epoch> is given.\n"
+"        "
+msgstr ""
+
+#: plugin.py:171
+msgid "number of seconds since epoch"
+msgstr ""
+
+#: plugin.py:176
+#, docstring
+msgid ""
+"[<channel>] [<format>] [<seconds since epoch>]\n"
+"\n"
+"        Returns the current time in <format> format, or, if <format> is not\n"
+"        given, uses the configurable format for the current channel.  If no\n"
+"        <seconds since epoch> time is given, the current time is used. If\n"
+"        <channel> is given without <format>, uses the format for <channel>.\n"
+"        "
+msgstr ""
+
+#: plugin.py:198
+#, docstring
+msgid ""
+"<seconds>\n"
+"\n"
+"        Returns a pretty string that is the amount of time represented by\n"
+"        <seconds>.\n"
+"        "
+msgstr ""
+
+#: plugin.py:208
+#, docstring
+msgid ""
+"<region>/<city> (or <region>/<state>/<city>)\n"
+"\n"
+"        Takes a city and its region, and returns its local time. This\n"
+"        command uses the IANA Time Zone Database."
+msgstr ""
+
+#: plugin.py:224
+msgid "Unknown timezone"
+msgstr ""
+
+#: plugin.py:226
+msgid "Timezone-related commands are not available. Your administrator need to either upgrade Python to version 3.9 or greater, or install pytz."
+msgstr ""
+
+#: plugin.py:239
+#, docstring
+msgid ""
+"[<year> <month> <day>]\n"
+"        Returns a the Discordian date today, or an optional different date."
+msgstr ""
+
+#: plugin.py:250
+msgid "The 'ddate' module is not installed. Use '%s -m pip install --user ddate' or see %u for more information."
+msgstr ""
+

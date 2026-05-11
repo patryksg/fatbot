@@ -1,0 +1,270 @@
+#!/usr/bin/env python3
+
+###
+# Copyright (c) 2002-2005, Jeremiah Fincher
+# Copyright (c) 2011, James McCoy
+# Copyright (c) 2010-2021, Valentin Lorentz
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#   * Redistributions of source code must retain the above copyright notice,
+#     this list of conditions, and the following disclaimer.
+#   * Redistributions in binary form must reproduce the above copyright notice,
+#     this list of conditions, and the following disclaimer in the
+#     documentation and/or other materials provided with the distribution.
+#   * Neither the name of the author of this software nor the name of
+#     contributors to this software may be used to endorse or promote products
+#     derived from this software without specific prior written consent.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+###
+
+import os
+import sys
+import time
+import shutil
+import fnmatch
+from tempfile import TemporaryDirectory
+started = time.time()
+
+import supybot
+import logging
+import traceback
+
+# We need to do this before we import conf.
+main_temp_dir = TemporaryDirectory()
+
+os.makedirs(os.path.join(main_temp_dir.name, 'conf'))
+os.makedirs(os.path.join(main_temp_dir.name, 'data'))
+os.makedirs(os.path.join(main_temp_dir.name, 'logs'))
+
+registryFilename = os.path.join(main_temp_dir.name, 'conf', 'test.conf')
+with open(registryFilename, 'w') as fd:
+    fd.write("""
+supybot.directories.backup: /dev/null
+supybot.directories.conf: {temp_conf}
+supybot.directories.data: {temp_data}
+supybot.directories.log: {temp_logs}
+supybot.reply.whenNotCommand: True
+supybot.log.stdout: False
+supybot.log.stdout.level: ERROR
+supybot.log.level: DEBUG
+supybot.log.format: %(levelname)s %(message)s
+supybot.log.plugins.individualLogfiles: False
+supybot.protocols.irc.throttleTime: 0
+supybot.reply.whenAddressedBy.chars: @
+supybot.networks.test.server: should.not.need.this
+supybot.networks.testnet1.server: should.not.need.this
+supybot.networks.testnet2.server: should.not.need.this
+supybot.networks.testnet3.server: should.not.need.this
+supybot.nick: test
+supybot.databases.users.allowUnregistration: True
+""".format(
+        temp_conf=os.path.join(main_temp_dir.name, 'conf'),
+        temp_data=os.path.join(main_temp_dir.name, 'data'),
+        temp_logs=os.path.join(main_temp_dir.name, 'logs')
+    ))
+
+import supybot.registry as registry
+registry.open_registry(registryFilename)
+
+import supybot.log as log
+import supybot.conf as conf
+conf.allowEval = True
+conf.supybot.flush.setValue(False)
+
+import re
+import sys
+import glob
+import atexit
+import os.path
+import unittest
+
+import supybot.utils as utils
+import supybot.world as world
+import supybot.callbacks as callbacks
+world.startedAt = started
+
+import logging
+class TestLogFilter(logging.Filter):
+    bads = [
+        'No callbacks in',
+        'Invalid channel database',
+        'Exact error',
+        'Invalid user dictionary',
+        'because of noFlush',
+        'Queuing NICK',
+        'Queuing USER',
+        'IgnoresDB.reload failed',
+        'Starting log for',
+        'Irc object for test dying',
+        'Last Irc,',
+        ]
+    def filter(self, record):
+        for bad in self.bads:
+            if bad in record.msg:
+                return False
+        return True
+log._logger.addFilter(TestLogFilter())
+
+class path(str):
+    """A class to represent platform-independent paths."""
+    _r = re.compile(r'[\\/]')
+    def __hash__(self):
+        return reduce(lambda h, s: h ^ hash(s), self._r.split(self), 0)
+    def __eq__(self, other):
+        return self._r.split(self) == self._r.split(other)
+
+def main():
+    import glob
+    import os.path
+    import optparse
+    import supybot.test as test
+    import supybot.plugin as plugin
+
+    parser = optparse.OptionParser(usage='Usage: %prog [options] [plugins]',
+                                   version='Supybot %s' % conf.version)
+    parser.add_option('-c', '--clean', action='store_true', default=False,
+                      dest='clean', help='Cleans the various data/conf/logs'
+                      'directories before running tests.')
+    parser.add_option('--clean-after', action='store_true', default=False,
+                      dest='clean_after', help='Cleans the various data/conf/logs'
+                      'directories after running tests.')
+    parser.add_option('-t', '--timeout', action='store', type='float',
+                      dest='timeout',
+                      help='Sets the timeout, in seconds, for tests to return '
+                      'responses.')
+    parser.add_option('-v', '--verbose', action='count', default=0,
+                      help='Increase verbosity, logging extra information '
+                           'about each test that runs.')
+    parser.add_option('', '--fail-fast', action='store_true', default=False,
+                      help='Stop at first failed test.')
+    parser.add_option('', '--no-network', action='store_true', default=False,
+                      dest='nonetwork', help='Causes the network-based tests '
+                                             'not to run.')
+    parser.add_option('', '--no-setuid', action='store_true', default=False,
+                      dest='nosetuid', help='Causes the tests based on a '
+                                             'setuid executable not to run.')
+    parser.add_option('', '--trace', action='store_true', default=False,
+                      help='Traces all calls made.  Unless you\'re really in '
+                      'a pinch, you probably shouldn\'t do this; it results '
+                      'in copious amounts of output.')
+    parser.add_option('', '--plugins-dir',
+                      action='append', dest='pluginsDirs', default=[],
+                      help='Looks in in the given directory for plugins and '
+                      'loads the tests from all of them.')
+    parser.add_option('', '--exclude',
+                      action='append', dest='excludePlugins', default=[],
+                      help='List of plugins you do not want --plugins-dir '
+                      'to include.')
+    parser.add_option('', '--disable-multiprocessing', action='store_true',
+                      dest='disableMultiprocessing',
+                      help='Disables multiprocessing stuff.')
+    (options, args) = parser.parse_args()
+
+    world.disableMultiprocessing = options.disableMultiprocessing
+
+    # This must go before checking for args, of course.
+    if options.excludePlugins:
+        exclusionPattern = re.compile('|'.join(
+            fnmatch.translate(pat) for pat in options.excludePlugins
+        ))
+    else:
+        exclusionPattern = None
+    for pluginDir in options.pluginsDirs:
+        for name in glob.glob(os.path.join(pluginDir, '*')):
+            if (exclusionPattern is None or not exclusionPattern.match(name)) \
+                    and os.path.isdir(name):
+                args.append(name)
+
+    if not args:
+        parser.print_help()
+        sys.exit(-1)
+
+    if options.timeout:
+        test.timeout = options.timeout
+
+    if options.trace:
+        traceFilename = conf.supybot.directories.log.dirize('trace.log')
+        fd = open(traceFilename, 'w')
+        sys.settrace(utils.gen.callTracer(fd))
+        atexit.register(fd.close)
+        atexit.register(lambda : sys.settrace(None))
+
+    world.myVerbose = options.verbose
+
+    if options.nonetwork:
+        test.network = False
+    if options.nosetuid:
+        test.setuid = False
+
+    log.testing = True
+    world.testing = True
+
+    args = [s.rstrip('\\/') for s in args]
+    pluginDirs = set([os.path.dirname(s) or '.' for s in args])
+    conf.supybot.directories.plugins.setValue(list(pluginDirs))
+    pluginNames = set([os.path.basename(s) for s in args])
+    load = unittest.defaultTestLoader.loadTestsFromModule
+    for pluginName in pluginNames:
+        if pluginName.endswith('.py'):
+            pluginName = pluginName[:-3]
+        try:
+            pluginModule = plugin.loadPluginModule(pluginName)
+        except (ImportError, callbacks.Error) as e:
+            sys.stderr.write('Failed to load plugin %s:' % pluginName)
+            traceback.print_exc()
+            sys.stderr.write('(pluginDirs: %s)\n' %
+                             conf.supybot.directories.plugins())
+            continue
+        if hasattr(pluginModule, 'test'):
+            test.suites.append(load(pluginModule.test))
+
+    suite = unittest.TestSuite(test.suites)
+    if options.fail_fast:
+        runner = unittest.TextTestRunner(verbosity=2,
+                failfast=True)
+    else:
+        runner = unittest.TextTestRunner(verbosity=2)
+    print('Testing began at %s (pid %s)' % (time.ctime(), os.getpid()))
+    if options.clean:
+        shutil.rmtree(conf.supybot.directories.log())
+        log._mkDirs()
+        shutil.rmtree(conf.supybot.directories.conf())
+        shutil.rmtree(conf.supybot.directories.data())
+    result = runner.run(suite)
+
+    if hasattr(unittest, 'asserts'):
+        print('Total asserts: %s' % unittest.asserts)
+
+    if options.clean_after:
+        log.setLevel(100)  # don't log anything anymore
+        shutil.rmtree(conf.supybot.directories.log())
+        shutil.rmtree(conf.supybot.directories.conf())
+        shutil.rmtree(conf.supybot.directories.data())
+
+    if result.wasSuccessful():
+        sys.exit(0)
+    else:
+        # Deactivate autocleaning for the temporary directiories to allow inspection.
+        main_temp_dir._finalizer.detach()
+        print(f"Temporary directory path: {main_temp_dir.name}")
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
+
+# vim:set shiftwidth=4 softtabstop=4 expandtab textwidth=79:

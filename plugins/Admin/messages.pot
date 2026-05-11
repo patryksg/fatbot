@@ -1,0 +1,199 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR ORGANIZATION
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"POT-Creation-Date: 2024-12-06 11:00+0100\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: pygettext.py 1.5\n"
+
+
+#: plugin.py:46
+#, docstring
+msgid ""
+"This plugin provides access to administrative commands, such as\n"
+"    adding capabilities, managing ignore lists, and joining channels.\n"
+"    This is a core Supybot plugin that should not be removed!"
+msgstr ""
+
+#: plugin.py:57
+#, docstring
+msgid "Nick/channel temporarily unavailable."
+msgstr ""
+
+#: plugin.py:85
+msgid "Cannot join %s, it's full."
+msgstr ""
+
+#: plugin.py:93
+msgid "Cannot join %s, I was not invited."
+msgstr ""
+
+#: plugin.py:101
+msgid "Cannot join %s, I am banned."
+msgstr ""
+
+#: plugin.py:109
+msgid "Cannot join %s, my keyword was wrong."
+msgstr ""
+
+#: plugin.py:117 plugin.py:126
+msgid "Cannot join %s, I'm not identified with NickServ."
+msgstr ""
+
+#: plugin.py:156
+#, docstring
+msgid ""
+"<channel> [<key>]\n"
+"\n"
+"        Tell the bot to join the given channel.  If <key> is given, it is used\n"
+"        when attempting to join the channel.\n"
+"        "
+msgstr ""
+
+#: plugin.py:162
+msgid "channel"
+msgstr ""
+
+#: plugin.py:169
+msgid "I'm already too close to maximum number of channels for this network."
+msgstr ""
+
+#: plugin.py:178
+#, docstring
+msgid ""
+"takes no arguments\n"
+"\n"
+"        Returns the channels the bot is on.\n"
+"        "
+msgstr ""
+
+#: plugin.py:187
+msgid "I'm not currently in any channels."
+msgstr ""
+
+#: plugin.py:193
+msgid "My connection is restricted, I can't change nicks."
+msgstr ""
+
+#: plugin.py:200
+msgid "Someone else is already using that nick."
+msgstr ""
+
+#: plugin.py:207
+msgid "I can't change nick, I'm currently banned in %s."
+msgstr ""
+
+#: plugin.py:215
+msgid "I can't change nicks, the server said %q."
+msgstr ""
+
+#: plugin.py:229
+#, docstring
+msgid ""
+"[<nick>] [<network>]\n"
+"\n"
+"        Changes the bot's nick to <nick>.  If no nick is given, returns the\n"
+"        bot's current nick.\n"
+"        "
+msgstr ""
+
+#: plugin.py:248
+#, docstring
+msgid ""
+"<name|hostmask> <capability>\n"
+"\n"
+"            Gives the user specified by <name> (or the user to whom <hostmask>\n"
+"            currently maps) the specified capability <capability>\n"
+"            "
+msgstr ""
+
+#: plugin.py:268
+msgid "The \"owner\" capability can't be added in the bot.  Use the supybot-adduser program (or edit the users.conf file yourself) to add an owner capability."
+msgstr ""
+
+#: plugin.py:279
+msgid "You can't add capabilities you don't have."
+msgstr ""
+
+#: plugin.py:284
+#, docstring
+msgid ""
+"<name|hostmask> <capability>\n"
+"\n"
+"            Takes from the user specified by <name> (or the user to whom\n"
+"            <hostmask> currently maps) the specified capability <capability>\n"
+"            "
+msgstr ""
+
+#: plugin.py:296
+msgid "That user doesn't have that capability."
+msgstr ""
+
+#: plugin.py:298
+msgid "You can't remove capabilities you don't have."
+msgstr ""
+
+#: plugin.py:306
+#, docstring
+msgid ""
+"<hostmask|nick> [<expires>]\n"
+"\n"
+"            This will set a persistent ignore on <hostmask> or the hostmask\n"
+"            currently associated with <nick>. <expires> is an optional argument\n"
+"            specifying when (in \"seconds from now\") the ignore will expire; if\n"
+"            it isn't given, the ignore will never automatically expire.\n"
+"            "
+msgstr ""
+
+#: plugin.py:319
+#, docstring
+msgid ""
+"<hostmask|nick>\n"
+"\n"
+"            This will remove the persistent ignore on <hostmask> or the\n"
+"            hostmask currently associated with <nick>.\n"
+"            "
+msgstr ""
+
+#: plugin.py:328
+msgid "%s wasn't in the ignores database."
+msgstr ""
+
+#: plugin.py:333
+#, docstring
+msgid ""
+"takes no arguments\n"
+"\n"
+"            Lists the hostmasks that the bot is ignoring.\n"
+"            "
+msgstr ""
+
+#: plugin.py:341
+msgid "I'm not currently globally ignoring anyone."
+msgstr ""
+
+#: plugin.py:345
+#, docstring
+msgid ""
+"takes no arguments\n"
+"\n"
+"        Clears the current send queue for this network.\n"
+"        "
+msgstr ""
+
+#: plugin.py:354
+#, docstring
+msgid ""
+"<command> [<arg> ...]\n"
+"\n"
+"        Perform <command> (with associated <arg>s on all channels on current network."
+msgstr ""
+

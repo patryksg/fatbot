@@ -1,0 +1,176 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Supybot\n"
+"POT-Creation-Date: 2024-12-06 11:00+0100\n"
+"PO-Revision-Date: 2012-04-27 15:36+0200\n"
+"Last-Translator: Mikaela Suomalainen <mikaela.suomalainen@outlook.com>\n"
+"Language-Team: German <fbesser@gmail.com>\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: pygettext.py 1.5\n"
+"X-Poedit-Language: German\n"
+"X-Poedit-Country: GERMANY\n"
+
+#: config.py:48
+msgid "Regex which alias names must match in order to be valid"
+msgstr ""
+
+#: plugin.py:48
+msgid ""
+"Returns the channel the msg came over or the channel given in args.\n"
+"\n"
+"    If the channel was given in args, args is modified (the channel is\n"
+"    removed).\n"
+"    "
+msgstr ""
+"Gibt den Kanal aus über den die Nachricht kam oder der Kanal der in den "
+"Argumenten gegeben wurde.\n"
+"\n"
+"Falls der Kanal in den Argumenten angegeben wurde, werden die Argumente "
+"bearbeitet (der Kanal wird entfernt."
+
+#: plugin.py:110
+msgid ""
+"Encodes dots and pipes\n"
+"    Format: a<number of escaped chars>a(<index>(d|p))+<word without dots or "
+"pipes>."
+msgstr ""
+
+#: plugin.py:226
+msgid " at least"
+msgstr "mindestens"
+
+#: plugin.py:228 plugin.py:233
+msgid ""
+"<an alias,%s %n>\n"
+"\n"
+"Alias for %q."
+msgstr ""
+"<ein Alias, %s %n>\n"
+"\n"
+"Alias für %q."
+
+#: plugin.py:229 plugin.py:234
+msgid "argument"
+msgstr "Argument"
+
+#: plugin.py:239
+msgid ""
+"\n"
+"    This plugin allows users to define aliases to commands and combinations\n"
+"    of commands (via nesting).\n"
+"    This plugin is only kept for backward compatibility, you should use the\n"
+"    built-in Aka plugin instead (you can migrate your existing aliases "
+"using\n"
+"    the 'importaliasdatabase' command.\n"
+"\n"
+"    To add an alias, ``trout``, which expects a word as an argument::\n"
+"\n"
+"        <jamessan> @alias add trout \"action slaps $1 with a large trout\"\n"
+"        <bot> jamessan: The operation succeeded.\n"
+"        <jamessan> @trout me\n"
+"        * bot slaps me with a large trout\n"
+"\n"
+"    Add an alias, ``randpercent``, which returns a random percentage "
+"value::\n"
+"\n"
+"        @alias add randpercent \"squish [dice 1d100]%\"\n"
+"\n"
+"    This requires the ``Filter`` and ``Games`` plugins to be loaded.\n"
+"\n"
+"    Note that nested commands in an alias should be quoted, or they will "
+"only\n"
+"    run once when you create the alias, and not each time the alias is\n"
+"    called. (In this case, not quoting the nested command would mean that\n"
+"    ``@randpercent`` always responds with the same value!)\n"
+"    "
+msgstr ""
+
+#: plugin.py:359
+msgid ""
+"<alias>\n"
+"\n"
+"        Locks an alias so that no one else can change it.\n"
+"        "
+msgstr ""
+"<Alias>\n"
+"\n"
+"Versperrt ein Alias, sodass er nicht verändert werden kann."
+
+#: plugin.py:367 plugin.py:380
+msgid "There is no such alias."
+msgstr "Es gibt keinen Alias mit diesem Namen."
+
+#: plugin.py:372
+msgid ""
+"<alias>\n"
+"\n"
+"        Unlocks an alias so that people can define new aliases over it.\n"
+"        "
+msgstr ""
+"<Alias>\n"
+"\n"
+"Entsperrt den Alias, sodass andere Personen ihn verändern können."
+
+#: plugin.py:388
+msgid "That name isn't valid.  Try %q instead."
+msgstr "Dieser Name ist nicht zulässig. Probiere anstatt %q."
+
+#: plugin.py:428
+#, fuzzy
+msgid ""
+"<name> <command>\n"
+"\n"
+"        Defines an alias <name> that executes <command>.  The <command>\n"
+"        should be in the standard \"command argument [nestedcommand "
+"argument]\"\n"
+"        arguments to the alias; they'll be filled with the first, second, "
+"etc.\n"
+"        arguments.  $1, $2, etc. can be used for required arguments.  @1, "
+"@2,\n"
+"        etc. can be used for optional arguments.  $* simply means \"all\n"
+"        remaining arguments,\" and cannot be combined with optional "
+"arguments.\n"
+"        "
+msgstr ""
+"<Name> <Alias>\n"
+"\n"
+"Definiert einen Alias <Name> der <Alias> ausführt. <Alias> sollte in der "
+"Standardform \"Befehl Argument [verschachtelter Befehl Argument\" angegeben "
+"werden."
+
+#: plugin.py:451
+msgid ""
+"<name>\n"
+"\n"
+"        Removes the given alias, if unlocked.\n"
+"        "
+msgstr ""
+"<Name>\n"
+"\n"
+"Entfernt den gegeben Alias, falls er nicht gesperrt ist."
+
+#: plugin.py:465
+msgid ""
+"[--locked|--unlocked]\n"
+"\n"
+"        Lists alias names of a particular type, defaults to all aliases if "
+"no\n"
+"        --locked or --unlocked option is given.\n"
+"        "
+msgstr ""
+
+#: plugin.py:472
+msgid "Cannot specify --locked and --unlocked simultaneously"
+msgstr ""
+
+#: plugin.py:488
+msgid "There are no aliases of that type."
+msgstr ""
+
+#: plugin.py:490
+#, fuzzy
+msgid "There are no aliases."
+msgstr "Es gibt keinen Alias mit diesem Namen."

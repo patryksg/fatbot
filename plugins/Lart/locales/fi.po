@@ -1,0 +1,86 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR ORGANIZATION
+# Mikaela Suomalainen, <mikaela.suomalainen@outlook.com> 2011.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Lart plugin for Limnoria\n"
+"POT-Creation-Date: 2022-02-06 00:12+0100\n"
+"PO-Revision-Date: 2014-12-20 12:04+0200\n"
+"Last-Translator: Mikaela Suomalainen <mikaela.suomalainen@outlook.com>\n"
+"Language-Team: \n"
+"Language: fi\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: pygettext.py 1.5\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 1.6.10\n"
+
+#: config.py:50
+msgid ""
+"Determines whether the bot will show the ids\n"
+"    of a lart when the lart is given."
+msgstr ""
+"Määrittää näyttääkö botti lartin id:eet\n"
+"    , kun lart annetaan."
+
+#: plugin.py:40
+msgid ""
+"\n"
+"    Provides an implementation of the Luser Attitude Readjustment Tool\n"
+"    for users.\n"
+"\n"
+"    Example:\n"
+"\n"
+"    * If you add ``slaps $who``.\n"
+"    * And Someone says ``@lart ChanServ``.\n"
+"    * ``* bot slaps ChanServ``.\n"
+"    "
+msgstr ""
+
+#: plugin.py:59
+msgid "Larts must contain $who."
+msgstr "Larttien täytyy sisältää $who."
+
+#: plugin.py:63
+msgid ""
+"[<channel>] [<id>] <who|what> [for <reason>]\n"
+"\n"
+"        Uses the Luser Attitude Readjustment Tool on <who|what> (for "
+"<reason>,\n"
+"        if given).  If <id> is given, uses that specific lart.  <channel> "
+"is\n"
+"        only necessary if the message isn't sent in the channel itself.\n"
+"        "
+msgstr ""
+"[<kanava>] [<id>] <kuka|mikä> [for <syystä>]\n"
+"\n"
+"        Käyttää \"Luser Attitude Readjustment Tool\" <keneen|mihint> (for "
+"<syystä>,\n"
+"        jos annettu).  Jos <id> on annettu, käyttää sitä tiettyä Larttia.  "
+"<kanava> on\n"
+"        vaadittu vain jos viestiä ei lähetetä kanavalla itsellään.\n"
+"        "
+
+#: plugin.py:77
+msgid "There is no lart with id #%i."
+msgstr "Tuolla ID:llä ei ole larttia #%i."
+
+#: plugin.py:82
+msgid "There are no larts in my database for %s."
+msgstr "Minun tietokannassani ei ole larttia %s:lle."
+
+#: plugin.py:88
+msgid "trying to dis me"
+msgstr "yrittämässä dissata minua"
+
+#: plugin.py:96
+msgid " for "
+msgstr "syystä"
+
+#, fuzzy
+#~ msgid ""
+#~ "Provides an implementation of the Luser Attitude Readjustment Tool\n"
+#~ "    for users."
+#~ msgstr "Tarjoaa käyttäjille Luuserin Asenteen Uudelleenmääritys Työkalun."

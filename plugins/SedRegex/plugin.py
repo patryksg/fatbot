@@ -1,0 +1,334 @@
+###
+# Copyright (c) 2015, Michael Daniel Telatynski <postmaster@webdevguru.co.uk>
+# Copyright (c) 2015-2025, James Lu <james@overdrivenetworks.com>
+# Copyright (c) 2020-2026, Valentin Lorentz
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#   * Redistributions of source code must retain the above copyright notice,
+#     this list of conditions, and the following disclaimer.
+#   * Redistributions in binary form must reproduce the above copyright notice,
+#     this list of conditions, and the following disclaimer in the
+#     documentation and/or other materials provided with the distribution.
+#   * Neither the name of the author of this software nor the name of
+#     contributors to this software may be used to endorse or promote products
+#     derived from this software without specific prior written consent.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+###
+
+import functools
+import multiprocessing
+from supybot.commands import *
+from supybot.commands import ProcessTimeoutError
+import supybot.plugins as plugins
+import supybot.ircmsgs as ircmsgs
+import supybot.callbacks as callbacks
+import supybot.ircutils as ircutils
+import supybot.ircdb as ircdb
+import supybot.utils as utils
+import supybot.world as world
+
+import re
+
+try:
+    from supybot.i18n import PluginInternationalization
+    _ = PluginInternationalization('SedRegex')
+except ImportError:
+    _ = lambda x: x
+
+from .sedregex import makeSedRegex
+
+TAG_SEEN = 'SedRegex.seen'
+TAG_IS_REGEX = 'SedRegex.isRegex'
+
+# Replace newlines and friends with things like literal "\n" (backslash and "n")
+axe_spaces = utils.str.MultipleReplacer({'\n': '\\n', '\t': '\\t', '\r': '\\r'})
+
+class SearchNotFoundError(Exception):
+    pass
+
+
+def filter_messages(network, msg, target, messages, ignoreRegex, sedRegex):
+    """Applies all filters but the user-provided regexp, so it is safe to
+    run in the main process."""
+    # short-lived cache for the duration of this request.
+    checkIgnored = functools.cache(ircdb.checkIgnored)
+
+    for m in messages:
+        if m.command in ('PRIVMSG', 'NOTICE') and \
+                ircutils.strEqual(m.args[0], msg.args[0]) and \
+                m.tagged('receivedBy') is not None and \
+                m.tagged('receivedBy').network == network :
+            if target and m.nick != target:
+                continue
+            # Don't snarf ignored users' messages unless specifically
+            # told to.
+            if ircdb.checkIgnored(m.prefix) and not target:
+                continue
+
+            # Test messages sent before SedRegex was activated. Mark them all as seen
+            # so we only need to do this check once per message.
+            if not m.tagged(TAG_SEEN):
+                m.tag(TAG_SEEN)
+                if sedRegex.match(m.args[1]):
+                    m.tag(TAG_IS_REGEX)
+            # Ignore messages containing a regexp if ignoreRegex is on.
+            if ignoreRegex and m.tagged(TAG_IS_REGEX):
+                continue
+
+            yield m
+
+def get_first_matching_message(pattern, messages):
+    for m in messages:
+        # When running substitutions, ignore the "* nick" part of any actions.
+        action = ircmsgs.isAction(m)
+        if action:
+            text = ircmsgs.unAction(m)
+        else:
+            text = m.args[1]
+
+        replace_result = pattern.search(text)
+        if replace_result:
+            return m
+
+def apply_substitution(pattern, replacement, m, count):
+    action = ircmsgs.isAction(m)
+    if action:
+        text = ircmsgs.unAction(m)
+    else:
+        text = m.args[1]
+
+    subst = pattern.sub(replacement, text, count)
+    if action:  # If the message was an ACTION, prepend the nick back.
+        subst = '* %s %s' % (m.nick, subst)
+
+    return axe_spaces(subst)
+
+def apply_substitution_to_first_matching_message(pattern, replacement,
+                                                 messages, count):
+    m = get_first_matching_message(pattern, messages)
+    if m:
+        subst = apply_substitution(pattern, replacement, m, count)
+        return (m, subst)
+
+
+class SedRegex(callbacks.Plugin):
+    """
+    Enable SedRegex on the desired channels:
+    ``config channel #yourchannel plugins.sedregex.enable True``
+    After enabling SedRegex, typing a regex in the form
+    ``s/text/replacement/`` will make the bot announce replacements.
+
+    ::
+
+       20:24 <jlu5> helli world
+       20:24 <jlu5> s/i/o/
+       20:24 <Limnoria> jlu5 meant to say: hello world
+
+    You can also do ``othernick: s/text/replacement/`` to only replace
+    messages from a certain user. Supybot ignores are respected by the plugin,
+    and messages from ignored users will only be considered if their nick is
+    explicitly given.
+
+    Regex flags
+    ^^^^^^^^^^^
+
+    The following regex flags (i.e. the ``g`` in ``s/abc/def/g``, etc.) are
+    supported:
+
+    - ``i``: case insensitive replacement
+    - ``g``: replace all occurences of the original text
+    - ``s``: *(custom flag specific to this plugin)* replace only messages
+      from the caller
+    """
+
+    threaded = True
+    public = True
+
+    @staticmethod
+    def _unpack_sed(sedRegex, expr):
+        if '\0' in expr:
+            raise ValueError('Expression can\'t contain NUL')
+
+        delim = expr[1]
+        escaped_expr = ''
+
+        for (i, c) in enumerate(expr):
+            if c == delim and i > 0:
+                if expr[i - 1] == '\\':
+                    escaped_expr = escaped_expr[:-1] + '\0'
+                    continue
+
+            escaped_expr += c
+
+        match = sedRegex.search(escaped_expr)
+
+        if not match:
+            return
+
+        groups = match.groupdict()
+        pattern = groups['pattern'].replace('\0', delim)
+        replacement = groups['replacement'].replace('\0', delim)
+
+        if groups['flags']:
+            raw_flags = set(groups['flags'])
+        else:
+            raw_flags = set()
+
+        flags = 0
+        count = 1
+
+        for flag in raw_flags:
+            if flag == 'g':
+                count = 0
+            if flag == 'i':
+                flags |= re.IGNORECASE
+
+        pattern = re.compile(pattern, flags)
+
+        return (pattern, replacement, count, raw_flags)
+
+    def doPrivmsg(self, irc, msg):
+        if not self.registryValue('enable', msg.channel, irc.network):
+            return
+
+        # Tag all messages that SedRegex has seen before. This slightly optimizes the ignoreRegex
+        # feature as all messages tagged with SedRegex.seen but not SedRegex.isRegex is NOT a regexp.
+        # If we didn't have this tag, we'd have to run a regexp match on each message in the history
+        # to check if it's a regexp, as there could've been regexp-like messages sent before
+        # SedRegex was enabled.
+        msg.tag(TAG_SEEN)
+
+        delimiters = self.registryValue('delimiters', msg.channel, irc.network)
+        if delimiters:
+            delimiters = re.escape(delimiters)
+        sedRegex = makeSedRegex(delimiters)
+        text = msg.args[1]
+        regexMatch = sedRegex.match(text)
+        if not regexMatch:
+            return
+
+        self.log.debug("SedRegex: running on %s/%s for %s", irc.network, msg.channel, regexMatch)
+        iterable = reversed(irc.state.history)
+        msg.tag(TAG_IS_REGEX)
+
+        try:
+            (pattern, replacement, count, flags) = self._unpack_sed(sedRegex, text)
+        except Exception as e:
+            self.log.warning(_("SedRegex parser error: %s"), e, exc_info=True)
+            if self.registryValue('displayErrors', msg.channel, irc.network):
+                irc.error('%s.%s: %s' % (e.__class__.__module__, e.__class__.__name__, e))
+            return
+
+        next(iterable)
+        if 's' in flags:  # Special 's' flag lets the bot only look at self messages
+            target = msg.nick
+        else:
+            target = regexMatch.group('nick')
+        if not ircutils.isNick(str(target)):
+            return
+
+        regex_timeout = self.registryValue('processTimeout')
+        if self.registryValue('boldReplacementText', msg.channel, irc.network):
+            replacement = ircutils.bold(replacement)
+        try:
+            if hasattr(multiprocessing.context, "ForkContext") and \
+                    isinstance(world.SUPYPROCESS_MULTIPROCESSING_CONTEXT,
+                               multiprocessing.context.ForkContext):
+                # global state is shared with child processes, so the child
+                # process has access to history and can lazily filter it
+                message = process(self._replacer_process, irc, msg,
+                        target, pattern, replacement, count, iterable, sedRegex,
+                        timeout=regex_timeout, pn=self.name(), cn='replacer')
+            else:
+                # SpawnContext (or possibly ForkServerContext in future
+                # versions of Limnoria): global state is not shared with child
+                # processes, so we have to filter the message list in the main
+                # process and pass it to the child.
+                message = self._replacer(irc, msg,
+                        target, pattern, replacement, count, iterable, sedRegex,
+                        timeout=regex_timeout, pn=self.name(), cn='replacer')
+        except ProcessTimeoutError:
+            irc.error(_("Search timed out."))
+        except SearchNotFoundError:
+            irc.error(_("Search not found in the last %i IRC messages on this network.") %
+                len(irc.state.history))
+        except Exception as e:
+            self.log.warning(_("SedRegex replacer error: %s"), e, exc_info=True)
+            if self.registryValue('displayErrors', msg.channel, irc.network):
+                irc.error('%s.%s: %s' % (e.__class__.__module__,
+                    e.__class__.__name__, e))
+        else:
+            irc.reply(message, prefixNick=False)
+
+    def _format_result(self, irc, msg, m, subst):
+        if m.nick == msg.nick:
+            fmt = self.registryValue('format', msg.channel, irc.network)
+            env = {'replacement': subst}
+        else:
+            fmt = self.registryValue('format.other', msg.channel, irc.network)
+            env = {'otherNick': msg.nick, 'replacement': subst}
+
+        return ircutils.standardSubstitute(irc, m, fmt, env)
+
+    def _replacer_process(self, irc, msg, target, pattern, replacement, count,
+                          messages, sedRegex):
+        ignoreRegex = self.registryValue('ignoreRegex', msg.channel, irc.network)
+        messages = filter_messages(irc.network, msg, target, messages,
+                                   ignoreRegex, sedRegex)
+
+        try:
+            m = get_first_matching_message(pattern, messages)
+            if m:
+                subst = apply_substitution(pattern, replacement, m, count)
+                return self._format_result(irc, msg, m, subst)
+        except Exception as e:
+            self.log.warning(_("SedRegex error: %s"), e, exc_info=True)
+            raise
+
+        self.log.debug(_("SedRegex: Search %r not found in the last %i messages of %s."),
+                         msg.args[1], len(irc.state.history), msg.args[0])
+        raise SearchNotFoundError()
+
+    def _replacer(self, irc, msg, target, pattern, replacement, count,
+                          messages, sedRegex, **kwargs):
+        ignoreRegex = self.registryValue('ignoreRegex', msg.channel, irc.network)
+        messages = filter_messages(irc.network, msg, target, messages,
+                                   ignoreRegex, sedRegex)
+        messages = list(messages)  # materialize the iterator to pickle it
+
+        try:
+            result = process(apply_substitution_to_first_matching_message,
+                             pattern, replacement, messages, count,
+                             load_plugin_modules=["SedRegex"], **kwargs)
+            if result:
+                (m, subst) = result
+                return self._format_result(irc, msg, m, subst)
+        except Exception as e:
+            self.log.warning(_("SedRegex error: %s"), e, exc_info=True)
+            raise
+
+        self.log.debug(_("SedRegex: Search %r not found in the last %i messages of %s."),
+                         msg.args[1], len(irc.state.history), msg.args[0])
+        raise SearchNotFoundError()
+
+    doNotice = doPrivmsg
+
+Class = SedRegex
+
+
+# vim:set shiftwidth=4 softtabstop=4 expandtab textwidth=79:

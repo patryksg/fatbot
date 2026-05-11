@@ -1,29 +1,38 @@
-# Live session cookies — NEVER commit these
-*-cookies.txt
-cookies.txt
-
-# Limnoria runtime
-__pycache__/
-*.pyc
-*.bak
-*.bak.*
-*.bak-*
-
-# Bot state — not the example, just the live conf
-fatbot.conf
-fatbot.conf.bak*
+*.mo
+*.py[cdo]
+*~
+.*.swp
+.swp
+MANIFEST
+backup/
+build/
+debian/compat
+debian/files
+debian/limnoria*
+debian/python-module-stampdir/
+dist/
+docs/_build/
+docs/plugins/
+limnoria.egg-info/
+merge.sh
+nano.save
+push.sh
+py3k/
+supybot.egg-info/
+test-conf/
+test-data/
+test-logs/
+doc-conf/
+doc-data/
+doc-logs/
+INSTALL
+README.txt
 conf/
 data/
 logs/
-backup/
-tmp/
-web/
+*.conf
+*.conf.bak
 
-# Brain / channel digests
-fatkidsinfo.md
-*.md.bak
-
-# Stray dotdirs that the sandbox redirects
-.cache/
-.config/
-.claude/
+# Intellij PyCharm / IDEA related files
+*.iml
+.idea

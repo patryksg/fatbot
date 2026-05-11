@@ -444,7 +444,7 @@ class Claude(callbacks.Plugin):
             return
 
         env = {
-            "HOME": "/home/fatbot",
+            "HOME": "/home/botuser",
             "PATH": "/home/botuser/.local/bin:/usr/bin:/bin",
             "CLAUDE_CONFIG_DIR": CONFIG_DIR,
             "XDG_CACHE_HOME": "/home/botuser/runbot/.cache",
