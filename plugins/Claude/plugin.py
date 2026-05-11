@@ -1,4 +1,5 @@
 import os
+import random
 import re
 import subprocess
 import threading
@@ -43,6 +44,26 @@ SYSTEM_PROMPT = (
 )
 
 EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
+
+INJECT_RE = re.compile(
+    r"(?i)\b(?:ignore|forget|disregard|override|bypass)\b.{0,60}"
+    r"\b(?:instructions?|directives?|prompts?|context|rules?|guidelines?|system)\b"
+    r"|\b(?:you are now|act as(?: if you are| a| an)?|pretend you(?: are| have)"
+    r"|from now on you|your new (?:instructions?|role|persona|directives?)"
+    r"|new (?:system )?prompt|roleplay as|jailbreak)\b"
+    r"|\bDAN\b",
+    re.IGNORECASE,
+)
+INJECT_RESPONSES = [
+    "nice try",
+    "lol no",
+    "prompt injection? in MY irc channel?",
+    "not today",
+    "haha no",
+    "yeah that's not how this works",
+    "instructions rejected, have a nice day",
+    "directive ignored, as per my actual directives",
+]
 URL_RE = re.compile(r'https?://[^\s)\]>\"]+')
 LEAK_LINE_RE = re.compile(
     r"\d+\s*%\s*(used|remaining|left)"
@@ -306,6 +327,9 @@ class Claude(callbacks.Plugin):
         return smart_truncate(shortened, MAX_CHARS)
 
     def _ask(self, irc, msg, question: str):
+        if INJECT_RE.search(question):
+            irc.reply(random.choice(INJECT_RESPONSES))
+            return
         key = self._ctx_key(msg)
         history = self._ctx.get(key)
         prompt_input = self._build_input(msg, question, history)
