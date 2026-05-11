@@ -192,8 +192,11 @@ commit them. The bot's `.gitignore` excludes `*-cookies.txt`.
 ## Claude plugin security
 
 The Claude plugin spawns `claude` (Claude Code CLI) as a subprocess and relays
-its output to an IRC channel. The attack surface is real: anyone in the channel
-can send arbitrary text to the model. The following mitigations are in place.
+its output to an IRC channel. Access is restricted: the plugin must be enabled
+for the channel, and the user must be a registered Limnoria user with the
+`claude` channel capability explicitly granted. The attack surface is therefore
+limited to trusted, named users — not the general public. The following
+mitigations are in place regardless.
 
 ### Hard stops (cannot be bypassed by the model or a prompt)
 
