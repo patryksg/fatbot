@@ -18,13 +18,13 @@ class Repo(callbacks.Plugin):
         irc.reply(REPO_URL)
     repo = wrap(repo)
 
-    def install(self, irc, msg, args):
+    def howto(self, irc, msg, args):
         """takes no arguments
 
         Reply with the link to the setup guide (Debian Trixie from scratch).
         """
         irc.reply("Setup guide (Debian Trixie from scratch): " + INSTALL_URL)
-    install = wrap(install)
+    howto = wrap(howto)
 
 
 Class = Repo
