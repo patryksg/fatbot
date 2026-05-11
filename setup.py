@@ -82,7 +82,7 @@ try:
         date = date.decode()
         date = int(date.strip())
     version = ".".join(str(i).zfill(2) for i in
-            time.strptime(time.asctime(time.gmtime(date)))[:3]) + "-fat"
+            time.strptime(time.asctime(time.gmtime(date)))[:3]) + "+fat"
 except:
     if os.path.isfile(VERSION_FILE):
         sys.path.insert(0, '') # Missing when installing from an sdist created
