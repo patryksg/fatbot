@@ -37,7 +37,6 @@ SYSTEM_PROMPT = (
 )
 
 EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
-URL_RE = re.compile(r'https?://[^\s)\]>\"]+')
 LEAK_LINE_RE = re.compile(
     r"\d+\s*%\s*(used|remaining|left)"
     r"|tokens?\s+(left|remaining|used|consumed)"
@@ -151,15 +150,9 @@ class Claude(callbacks.Plugin):
 
         Send a question to Claude and reply with a short, friendly answer.
         """
-        if not self.registryValue('channelEnabled', msg.channel, irc.network):
-            return
         cap = ircdb.makeChannelCapability(msg.channel, CAPABILITY)
-        try:
-            u = ircdb.users.getUser(msg.prefix)
-            if not u._checkCapability(cap):
-                irc.errorNoCapability(cap)
-                return
-        except KeyError:
+        if not ircdb.checkCapability(msg.prefix, cap):
+            irc.errorNoCapability(cap)
             return
         question = text.strip()
         if not question:
@@ -194,14 +187,8 @@ class Claude(callbacks.Plugin):
         if question is None:
             return
 
-        if not self.registryValue('channelEnabled', target, irc.network):
-            return
         cap = ircdb.makeChannelCapability(target, CAPABILITY)
-        try:
-            u = ircdb.users.getUser(msg.prefix)
-            if not u._checkCapability(cap):
-                return
-        except KeyError:
+        if not ircdb.checkCapability(msg.prefix, cap):
             return
         self._ask(irc, msg, question)
 
@@ -230,31 +217,6 @@ class Claude(callbacks.Plugin):
         lines.append("")
         lines.append(f"[{nick}]: {question}")
         return "\n".join(lines)
-
-    def _shorten_urls(self, irc, msg, text: str) -> str:
-        cb = irc.getCallback('ShrinkUrl')
-        if cb is None:
-            return text
-        channel = msg.args[0] if msg.args else None
-        network = irc.network
-        seen = {}
-
-        def replace(m):
-            url = m.group(0).rstrip('.,;:!?')
-            if url in seen:
-                return seen[url]
-            try:
-                service = cb.registryValue('default', channel, network).capitalize()
-                method = getattr(cb, '_get%sUrl' % service, None)
-                short = method(url) if method else None
-            except Exception:
-                short = None
-            result = short if short else url
-            seen[url] = result
-            return result
-
-        shortened = URL_RE.sub(replace, text)
-        return smart_truncate(shortened, MAX_CHARS)
 
     def _ask(self, irc, msg, question: str):
         key = self._ctx_key(msg)
@@ -307,7 +269,6 @@ class Claude(callbacks.Plugin):
         if not out:
             irc.reply("(no reply)")
             return
-        out = self._shorten_urls(irc, msg, out)
         irc.reply(out)
         self._ctx.add(key, question, out)
 
