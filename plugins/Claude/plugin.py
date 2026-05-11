@@ -219,6 +219,9 @@ class Claude(callbacks.Plugin):
             stripped = addressed.strip()
             if not stripped:
                 return
+            if INJECT_RE.search(stripped):
+                irc.reply(random.choice(INJECT_RESPONSES))
+                return
             first = stripped.split(None, 1)[0].lower()
             if self._is_known_command(irc, first):
                 return
@@ -226,6 +229,9 @@ class Claude(callbacks.Plugin):
         else:
             candidate, requires_context = parse_addressed(text, irc.nick)
             if candidate is None:
+                return
+            if INJECT_RE.search(candidate):
+                irc.reply(random.choice(INJECT_RESPONSES))
                 return
             if requires_context and not self._ctx.get(self._ctx_key(msg)):
                 return
