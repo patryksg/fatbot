@@ -1,15 +1,5 @@
 # fatbot
 
-> **⚠️ VIBECODED — USE AT YOUR OWN RISK**
->
-> This entire codebase was written with AI assistance (Claude Code / Claude Sonnet).
-> It has not been formally audited. It runs a bot connected to a public IRC network,
-> exposes a subprocess-based LLM interface to channel users, and handles untrusted
-> URLs from the internet. Known risks include prompt injection, SSRF, session-token
-> leakage, and general "AI wrote this" bugs. Read the code before deploying it.
-> Security mitigations for the Claude plugin are documented in the
-> [Claude plugin security](#claude-plugin-security) section below.
-
 Limnoria IRC bot (`fatbot`) running on **skund**. Connects to efnet
 (`efnet.tngnet.nl`), joins `#fatkids`, `#oldnews`, `#testing123`.
 
@@ -188,54 +178,6 @@ re-export periodically.
 
 **Security note:** these files contain live session tokens. Never
 commit them. The bot's `.gitignore` excludes `*-cookies.txt`.
-
-## Claude plugin security
-
-The Claude plugin spawns `claude` (Claude Code CLI) as a subprocess and relays
-its output to an IRC channel. The attack surface is real: anyone in the channel
-can send arbitrary text to the model. The following mitigations are in place.
-
-### Hard stops (cannot be bypassed by the model or a prompt)
-
-| Mitigation | How |
-|---|---|
-| **No tool access** | `--tools ""` passed on every invocation — claude cannot shell out, read files, or make network requests regardless of what a prompt tells it to do. |
-| **No shell** | Plugin builds argv as a Python list and passes the question via stdin. No `shell=True`, no interpolation, no command-injection surface. |
-| **Email redaction** | `EMAIL_RE` strips any email-shaped string from every output line before it reaches the channel. Claude Code injects the OAuth account email into model context regardless of `--system-prompt`; the regex catches leakage even across future model updates. |
-| **Rate/token line suppression** | `LEAK_LINE_RE` drops any output line mentioning rate limits, token usage, or pricing. |
-| **Stderr never relayed** | subprocess stderr is captured and discarded; internal errors don't reach the channel. |
-| **Capability gate** | Both the `!claude` command and the nick-addressed `doPrivmsg` listener check `ircdb.checkCapability` for a per-channel `claude` cap. Only explicitly registered users hold this cap — channel-default was deliberately **not** used to avoid granting access to unregistered users. |
-| **Public-only** | The `!claude` command uses Limnoria's `'public'` wrap filter; `doPrivmsg` filters by channel prefix. PMs are blocked. |
-
-### Soft stops (model-level, not cryptographically guaranteed)
-
-| Mitigation | How |
-|---|---|
-| **System prompt** | Instructs the model to reply concisely, avoid disclaimers, and not relay internal context. Soft barrier — overridable by a sufficiently clever prompt, which is why the hard stops above exist. |
-| **No session persistence** | `--no-session-persistence --disable-slash-commands` passed on every call. Context is synthetic (Q/A pairs prepended to stdin), lost on restart. |
-| **Per-user context TTL** | In-memory context store with a 6-minute sliding TTL, max 5 turns. Not persisted to disk. |
-
-### Systemd sandbox
-
-The fatbot service itself runs under `ProtectHome=read-only` with
-`ReadWritePaths=/home/fatbot/runbot`, `PrivateTmp=true`, dropped capabilities,
-seccomp filter (`@system-service ~@privileged`), MDWE, PrivateDevices,
-ProtectProc=invisible. The claude subprocess inherits this sandbox. XDG env
-vars redirect any writes into `ReadWritePaths` so nothing escapes to `$HOME`.
-
-**Known remaining risks:**
-
-- `--tools ""` is a CLI flag, not a kernel guarantee. A future Claude Code
-  update could change flag semantics.
-- DNS rebinding: the Title/image SSRF guard re-validates hosts via
-  `getaddrinfo` but `curl_cffi` 0.15 doesn't support `resolve=`, so curl
-  re-resolves at connect time (TOCTOU window).
-- Session cookies (`reddit-cookies.txt`, `youtube-cookies.txt`) contain live
-  browser tokens — if the bot process is compromised they're exposed.
-- The MCP image viewer (`mcp_imageview.py`) fetches arbitrary URLs from IRC
-  on model request. SSRF-guarded and image-only, but the attack surface exists.
-
----
 
 ## Command prefix
 
