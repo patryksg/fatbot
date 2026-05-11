@@ -28,6 +28,22 @@ except Exception:
 # that just stops at whitespace or closing brackets.
 _HTTP_URL_RE = re.compile(r'https?://[^\s\])>]+')
 
+# Skip URLs whose path ends in an obvious media/binary extension — no
+# point fetching or shortening these (no <title>, the resulting
+# ":: <url>" / "<short>" lines are just noise).
+_SKIP_EXT_RE = re.compile(
+    r'\.(?:jpe?g|png|gif|webp|bmp|svg|ico|tiff?|heic|avif|'
+    r'mp4|webm|mkv|mov|avi|m4v|wmv|flv|'
+    r'mp3|ogg|flac|wav|m4a|opus|aac|'
+    r'pdf|zip|tar|gz|tgz|xz|7z|rar|bz2|'
+    r'iso|exe|dmg|deb|rpm|apk)$',
+    re.IGNORECASE,
+)
+
+# Content-Types we never want to download a body for. HTML/XML filtering
+# for the title path is separate, in fetch_title.
+_BINARY_CT_RE = re.compile(r'^\s*(?:image|video|audio)/', re.IGNORECASE)
+
 _TITLE_RE = re.compile(r'<title[^>]*>(.*?)</title>', re.IGNORECASE | re.DOTALL)
 _META_CHARSET_RE = re.compile(
     r'<meta[^>]+charset\s*=\s*["\']?([\w\-]+)', re.IGNORECASE)
@@ -168,6 +184,12 @@ def _do_one_get(url, referer, timeout, max_bytes, cookies_file=None):
                 headers=headers, stream=True,
             )
             try:
+                # Bail before downloading the body on image/video/audio
+                # responses. Headers are available pre-body when streaming.
+                ct_early = (r.headers.get('content-type')
+                            or r.headers.get('Content-Type') or '')
+                if _BINARY_CT_RE.match(ct_early):
+                    return None, None
                 buf = bytearray()
                 for chunk in r.iter_content(chunk_size=16384):
                     if not chunk:
@@ -382,6 +404,12 @@ class Title(callbacks.Plugin):
             return
         url = _strip_trailing_punct(m.group(0))
         if not url:
+            return
+        try:
+            url_path = urllib.parse.urlsplit(url).path or ''
+        except ValueError:
+            return
+        if _SKIP_EXT_RE.search(url_path):
             return
         skip_re = self.registryValue('nonSnarfingRegexp', channel, irc.network)
         if skip_re and skip_re.search(url):
