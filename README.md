@@ -141,7 +141,15 @@ ChannelLogger (stock) is also loaded but does not appear in the
 Custom plugins currently installed:
 
 - **ChanModes** — auto-asserts a configured mode string when bot has +o
-- **Claude** — Claude-API-backed chat / Q&A; see [Claude plugin security](#claude-plugin-security)
+- **Claude** — Claude-API-backed chat / Q&A. Per-channel mode is one of
+  `claude` / `smart` / `gem`, switched via `!claude` / `!smart` / `!gem`
+  (capability-gated). When the `claude` subprocess exits with a
+  rate-limit / quota-exhausted error and `geminiFallback` is enabled for
+  the channel, the plugin posts `(claude out of tokens — switching to
+  gem)`, flips the channel mode to `gem`, and answers via Gemini Flash
+  (`gemini-2.5-flash`, marked with a trailing `(gem)`). The channel
+  stays on `gem` until someone runs `!claude` / `!smart` again. See
+  [Claude plugin security](#claude-plugin-security)
 - **Greeter**, **Hamster**, **InfoToggle**, **Relay** — utility plugins
 - **ShrinkUrl** — overridden to default to is.gd via cloudflare-warp
   SOCKS5; falls back to tinyurl
