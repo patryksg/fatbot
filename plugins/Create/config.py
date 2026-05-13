@@ -15,3 +15,11 @@ conf.registerChannelValue(Create, 'model',
 conf.registerGlobalValue(Create, 'timeoutSec',
     registry.PositiveInteger(120,
         'HTTP timeout for the Runware image generation request.'))
+
+conf.registerGlobalValue(Create, 'videoTimeoutSec',
+    registry.PositiveInteger(900,
+        'Total time to wait for video generation (Atlas/fal) to finish.'))
+
+conf.registerChannelValue(Create, 'picModel',
+    registry.String('civitai:133005@1759168',
+        'Runware AIR for !pic and seed image of !video (default: Juggernaut XL v11, SFW-tauglich).'))
