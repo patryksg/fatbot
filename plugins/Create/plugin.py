@@ -433,5 +433,28 @@ class Create(callbacks.Plugin):
 
     uncap = wrap(uncap, [("checkCapability", "admin"), "public", "somethingWithoutSpaces", optional("somethingWithoutSpaces")])
 
+    # ------------------------------------------------------------ !chancap / !unchancap
+
+    def chancap(self, irc, msg, args, channel, capname):
+        """[<channel>] <capname> — enable feature <capname> in <channel> (defaults to current)."""
+        chan = ircdb.channels.getChannel(channel)
+        chan.addCapability(capname)
+        ircdb.channels.setChannel(channel, chan)
+        irc.reply("enabled '%s' in %s" % (capname, channel), prefixNick=False)
+
+    chancap = wrap(chancap, [("checkCapability", "admin"), ("channel"), "somethingWithoutSpaces"])
+
+    def unchancap(self, irc, msg, args, channel, capname):
+        """[<channel>] <capname> — disable feature <capname> in <channel> (defaults to current)."""
+        chan = ircdb.channels.getChannel(channel)
+        try:
+            chan.removeCapability(capname)
+        except KeyError:
+            pass
+        ircdb.channels.setChannel(channel, chan)
+        irc.reply("disabled '%s' in %s" % (capname, channel), prefixNick=False)
+
+    unchancap = wrap(unchancap, [("checkCapability", "admin"), ("channel"), "somethingWithoutSpaces"])
+
 
 Class = Create

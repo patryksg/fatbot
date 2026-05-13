@@ -1,4 +1,3 @@
-import random
 import string
 import supybot.conf as conf
 import supybot.ircdb as ircdb
@@ -162,10 +161,10 @@ class InfoToggle(callbacks.Plugin):
             irc.error("Hostmask " + mask + " already registered to another user.")
             return
         irc.queueMsg(ircmsgs.privmsg(
-            msg.nick,
-            "User '" + nick + "' password: " + password,
+            nick,
+            "You have been registered with the bot. Your password is: " + password,
         ))
-        irc.reply("User '" + nick + "' added with hostmask " + mask + ". Password sent via PM.")
+        irc.reply("User '" + nick + "' added with hostmask " + mask + ". Password sent to " + nick + " via PM.")
 
     adduser = wrap(adduser, ["nick"])
 

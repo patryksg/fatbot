@@ -40,7 +40,7 @@ RATELIMIT_RE = re.compile(
 )
 
 BRAIN_PATH = "/home/botuser/runbot/fatkidsinfo.md"
-BRAIN_CHANNELS = ("#yourchannel", "#testing")
+BRAIN_CAP = "brain"
 BRAIN_MAX_BYTES = 16_000
 
 SYSTEM_PROMPT_HEAD = (
@@ -369,7 +369,14 @@ class Claude(callbacks.Plugin):
     def _build_input(self, msg, question: str, history) -> str:
         if not history:
             channel = (msg.args[0] or "").lower()
-            if channel in BRAIN_CHANNELS:
+            brain_on = False
+            if channel:
+                try:
+                    chan = ircdb.channels.getChannel(channel)
+                    brain_on = BRAIN_CAP in chan.capabilities
+                except KeyError:
+                    brain_on = False
+            if brain_on:
                 brain = self._load_brain()
                 if brain:
                     speaker = msg.nick or "user"
@@ -470,9 +477,6 @@ class Claude(callbacks.Plugin):
         gemini_key = os.environ.get("GEMINI_API_KEY")
         if gemini_key:
             env["GEMINI_API_KEY"] = gemini_key
-        anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-        if anthropic_key:
-            env["ANTHROPIC_API_KEY"] = anthropic_key
         cmd = [
             CLAUDE_BIN,
             "-p",
