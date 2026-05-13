@@ -1,3 +1,4 @@
+import random
 import string
 import supybot.conf as conf
 import supybot.ircdb as ircdb
