@@ -12,7 +12,6 @@ is.gd through the WARP SOCKS5 proxy on 127.0.0.1:40000.
 
 import os
 import re
-import shlex
 import subprocess
 
 import supybot.ircdb as ircdb

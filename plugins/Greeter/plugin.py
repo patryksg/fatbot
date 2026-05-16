@@ -1,5 +1,7 @@
 import json
 import os
+import tempfile
+import threading
 import supybot.callbacks as callbacks
 import supybot.ircmsgs as ircmsgs
 import supybot.conf as conf
@@ -11,6 +13,7 @@ class Greeter(callbacks.Plugin):
     def __init__(self, irc):
         super().__init__(irc)
         self.datafile = conf.supybot.directories.data.dirize("Greeter.json")
+        self._lock = threading.Lock()
         self._load()
 
     def _load(self):
@@ -21,25 +24,37 @@ class Greeter(callbacks.Plugin):
             self.greetings = {}
 
     def _save(self):
-        with open(self.datafile, "w") as f:
-            json.dump(self.greetings, f, indent=2)
+        d = os.path.dirname(self.datafile) or "."
+        fd, tmp = tempfile.mkstemp(prefix=".Greeter.", suffix=".json", dir=d)
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(self.greetings, f, indent=2)
+            os.replace(tmp, self.datafile)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
     def addgreet(self, irc, msg, args, nick, greeting):
         """<nick> <greeting> -- Adds a greeting for <nick> when they join #yourchannel."""
-        self.greetings[nick.lower()] = greeting
-        self._save()
+        with self._lock:
+            self.greetings[nick.lower()] = greeting
+            self._save()
         irc.replySuccess()
-    addgreet = wrap(addgreet, ["something", "text"])
+    addgreet = wrap(addgreet, [("checkCapability", "admin"), "something", "text"])
 
     def delgreet(self, irc, msg, args, nick):
         """<nick> -- Removes the greeting for <nick>."""
-        if nick.lower() in self.greetings:
+        with self._lock:
+            if nick.lower() not in self.greetings:
+                irc.reply("No greeting found for %s." % nick)
+                return
             del self.greetings[nick.lower()]
             self._save()
-            irc.replySuccess()
-        else:
-            irc.reply("No greeting found for %s." % nick)
-    delgreet = wrap(delgreet, ["something"])
+        irc.replySuccess()
+    delgreet = wrap(delgreet, [("checkCapability", "admin"), "something"])
 
     def listgreets(self, irc, msg, args):
         """Lists all stored greetings."""
@@ -48,7 +63,7 @@ class Greeter(callbacks.Plugin):
             return
         entries = ["[%s] %s" % (n, g) for n, g in sorted(self.greetings.items())]
         irc.reply(", ".join(entries))
-    listgreets = wrap(listgreets)
+    listgreets = wrap(listgreets, [("checkCapability", "admin")])
 
     def doJoin(self, irc, msg):
         channel = msg.args[0]

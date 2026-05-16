@@ -250,13 +250,13 @@ class ShrinkUrl(callbacks.PluginRegexp):
     def _getUr1Url(self, url):
         url = self._cleanUrl(url)[0]
         try:
-            return self.db.get('ur1ca', utils.web.urlquote(url))
+            return self.db.get('ur1ca', url)
         except KeyError:
             parameters = utils.web.urlencode({'longurl': url})
             response = utils.web.getUrl(self._ur1Api, data=parameters)
             ur1ca = self._ur1Regexp.search(response.decode()).group('url')
             if ur1ca:
-                self.db.set('ur1', url, ur1ca)
+                self.db.set('ur1ca', url, ur1ca)
                 return ur1ca
             else:
                 raise ShrinkError(response)

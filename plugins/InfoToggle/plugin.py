@@ -1,4 +1,4 @@
-import random
+import secrets
 import string
 import supybot.conf as conf
 import supybot.ircdb as ircdb
@@ -8,9 +8,9 @@ import supybot.ircmsgs as ircmsgs
 from supybot.commands import wrap, optional
 
 
-def _random_password(length=8):
+def _random_password(length=20):
     chars = string.ascii_letters + string.digits
-    return ''.join(random.choices(chars, k=length))
+    return ''.join(secrets.choice(chars) for _ in range(length))
 
 
 def _wildcard_hostmask(full_hostmask):
@@ -161,11 +161,12 @@ class InfoToggle(callbacks.Plugin):
             ircdb.users.delUser(user.id)
             irc.error("Hostmask " + mask + " already registered to another user.")
             return
-        irc.queueMsg(ircmsgs.privmsg(
+        irc.queueMsg(ircmsgs.notice(
             nick,
-            "You have been registered with the bot. Your password is: " + password,
+            "You have been registered with the bot. Your password is: " + password
+            + " (transmitted via IRC NOTICE; rotate it after first login).",
         ))
-        irc.reply("User '" + nick + "' added with hostmask " + mask + ". Password sent to " + nick + " via PM.")
+        irc.reply("User '" + nick + "' added with hostmask " + mask + ". Password sent to " + nick + " via NOTICE.")
 
     adduser = wrap(adduser, ["nick"])
 
