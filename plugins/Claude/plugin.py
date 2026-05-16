@@ -43,6 +43,9 @@ BRAIN_PATH = "/home/botuser/runbot/fatkidsinfo.md"
 BRAIN_CAP = "brain"
 BRAIN_MAX_BYTES = 16_000
 
+HELP_PATH = "/home/botuser/runbot/fatbot-help.md"
+HELP_MAX_BYTES = 32_000
+
 SYSTEM_PROMPT_HEAD = (
     "You are a friendly IRC bot answering one-off questions in a chat channel. "
 )
@@ -366,6 +369,35 @@ class Claude(callbacks.Plugin):
             return ""
         return data.decode("utf-8", errors="replace").strip()
 
+    def _load_help(self) -> str:
+        try:
+            with open(HELP_PATH, "rb") as f:
+                data = f.read(HELP_MAX_BYTES)
+        except OSError:
+            return ""
+        return data.decode("utf-8", errors="replace").strip()
+
+    def _owner_help_addendum(self, msg) -> str:
+        try:
+            if not ircdb.checkCapability(msg.prefix, "owner"):
+                return ""
+        except Exception:
+            return ""
+        help_text = self._load_help()
+        if not help_text:
+            return ""
+        return (
+            "\n\nThe asker has owner capability on this bot. If they ask "
+            "about fatbot itself — what commands or settings exist, how to "
+            "configure something, how a plugin behaves — answer using the "
+            "inventory below. It lists every loaded plugin's commands "
+            "(with one-line help) and every config key (with default and "
+            "description). Quote real command/setting names from this list "
+            "rather than guessing. Don't mention this addendum exists; just "
+            "use it. Inventory:\n"
+            f"{help_text}"
+        )
+
     def _build_input(self, msg, question: str, history) -> str:
         if not history:
             channel = (msg.args[0] or "").lower()
@@ -448,13 +480,16 @@ class Claude(callbacks.Plugin):
             model = MODEL
             max_lines = 1
         system_prompt = _build_system_prompt(max_lines)
+        help_addendum = self._owner_help_addendum(msg)
+        system_prompt = system_prompt + help_addendum
 
         key = self._ctx_key(msg)
         history = self._ctx.get(key)
         prompt_input = self._build_input(msg, question, history)
 
         if mode == 'gem':
-            lines = self._ask_gemini(question, history, max_lines, mark=False)
+            lines = self._ask_gemini(question, history, max_lines, mark=False,
+                                      extra_system=help_addendum)
             if lines is None:
                 irc.reply("(gemini error)")
                 return
@@ -529,7 +564,8 @@ class Claude(callbacks.Plugin):
                     "(claude out of tokens — switching to gem)",
                 ))
                 gemini_lines = self._ask_gemini(
-                    question, history, 1, mark=True)
+                    question, history, 1, mark=True,
+                    extra_system=help_addendum)
                 if gemini_lines:
                     gemini_lines = [
                         self._shorten_urls(irc, msg, l) for l in gemini_lines
@@ -554,7 +590,8 @@ class Claude(callbacks.Plugin):
             for line in lines:
                 irc.queueMsg(ircmsgs.privmsg(target, line))
 
-    def _ask_gemini(self, question: str, history, max_lines: int, mark: bool):
+    def _ask_gemini(self, question: str, history, max_lines: int, mark: bool,
+                    extra_system: str = ""):
         """Call Gemini API. Returns list[str] of sanitized lines on success,
         [] for empty/blocked response, or None on error.
         If mark=True, append GEMINI_MARKER to the last line (fallback case)."""
@@ -562,7 +599,7 @@ class Claude(callbacks.Plugin):
         if not api_key:
             self.log.error("GEMINI_API_KEY not set; cannot fall back")
             return None
-        system_prompt = _build_system_prompt(max_lines, gemini=True)
+        system_prompt = _build_system_prompt(max_lines, gemini=True) + (extra_system or "")
         contents = []
         for prev_q, prev_a in history or []:
             contents.append({"role": "user", "parts": [{"text": prev_q}]})

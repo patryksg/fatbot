@@ -8,6 +8,7 @@ Create: image and video generation via Runware.ai (image) + Atlas Cloud (video).
 """
 
 import os
+import re
 import uuid
 import json
 import subprocess
@@ -28,10 +29,24 @@ ATLAS_ENDPOINT = "https://api.atlascloud.ai/api/v1/model/generateVideo"
 ATLAS_POLL_BASE = "https://api.atlascloud.ai/api/v1/model/prediction/"
 ATLAS_I2V_MODEL = "atlascloud/wan-2.2-turbo-spicy/image-to-video"
 ATLAS_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
+SEED_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+DEFAULT_MOTION_PROMPT = "natural subtle motion, gentle ambient movement"
 CLAUDE_BIN = "/home/botuser/.local/bin/claude"
 CLAUDE_CONFIG_DIR = "/home/botuser/runbot/.claude"
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 CLAUDE_TIMEOUT = 30
+
+ATLAS_LLM_ENDPOINT = "https://api.atlascloud.ai/v1/chat/completions"
+ATLAS_LLM_MODEL = "xai/grok-4-fast-non-reasoning"
+ATLAS_LLM_TIMEOUT = 30
+
+REFUSAL_MARKERS = (
+    "i'm not able", "i am not able", "i'm unable", "i am unable",
+    "i can't", "i cannot", "i can not", "i won't", "i will not",
+    "i'd be happy", "i would be happy", "i don't", "i do not",
+    "sorry,", "sorry —", "sorry, but", "let me know", "happy to",
+)
 
 EXPAND_SYSTEM = (
     "You add cinematographic / photographic styling details to an image generation prompt. "
@@ -198,7 +213,15 @@ class Create(callbacks.Plugin):
             pass
         return url
 
-    def _expand_prompt(self, prompt):
+    def _clean_suffix(self, raw):
+        suffix = (raw or "").strip().strip('"').strip("'").rstrip(".")
+        if not suffix:
+            return None
+        if any(m in suffix.lower() for m in REFUSAL_MARKERS):
+            return None
+        return suffix
+
+    def _expand_via_claude(self, prompt):
         env = {
             "HOME": "/home/botuser",
             "PATH": "/home/botuser/.local/bin:/usr/bin:/bin",
@@ -217,40 +240,84 @@ class Create(callbacks.Plugin):
         ]
         try:
             result = subprocess.run(
-                cmd,
-                input=prompt,
-                capture_output=True,
-                text=True,
-                timeout=CLAUDE_TIMEOUT,
-                env=env,
+                cmd, input=prompt, capture_output=True, text=True,
+                timeout=CLAUDE_TIMEOUT, env=env,
             )
         except subprocess.TimeoutExpired:
-            self.log.warning("Create: prompt expand timed out, using original")
-            return prompt
+            self.log.warning("Create: claude expand timed out")
+            return None
         except Exception as e:
-            self.log.warning("Create: prompt expand failed (%s), using original", e)
-            return prompt
+            self.log.warning("Create: claude expand failed (%s)", e)
+            return None
         if result.returncode != 0:
             self.log.warning(
-                "Create: claude exit %d stderr=%r (using original)",
+                "Create: claude exit %d stderr=%r",
                 result.returncode, (result.stderr or "")[:300],
             )
-            return prompt
-        suffix = (result.stdout or "").strip().strip('"').strip("'").rstrip(".")
-        if not suffix:
-            return prompt
-        low = suffix.lower()
-        refusal_markers = (
-            "i'm not able", "i am not able", "i'm unable", "i am unable",
-            "i can't", "i cannot", "i can not", "i won't", "i will not",
-            "i'd be happy", "i would be happy", "i don't", "i do not",
-            "sorry,", "sorry —", "sorry, but", "let me know", "happy to",
+            return None
+        return self._clean_suffix(result.stdout)
+
+    def _expand_via_atlas(self, prompt):
+        api_key = os.environ.get("ATLASCLOUD_API_KEY")
+        if not api_key:
+            self.log.warning("Create: ATLASCLOUD_API_KEY not set, no fallback")
+            return None
+        body = {
+            "model": ATLAS_LLM_MODEL,
+            "messages": [
+                {"role": "system", "content": EXPAND_SYSTEM},
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": 200,
+            "temperature": 0.7,
+        }
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            ATLAS_LLM_ENDPOINT,
+            data=data,
+            headers={
+                "Authorization": "Bearer " + api_key,
+                "Content-Type": "application/json",
+                "User-Agent": ATLAS_UA,
+            },
+            method="POST",
         )
-        if any(m in low for m in refusal_markers):
-            self.log.info("Create: expander refused (%r), using original prompt", suffix[:120])
+        try:
+            with urllib.request.urlopen(req, timeout=ATLAS_LLM_TIMEOUT) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            try:
+                err_body = e.read().decode("utf-8", errors="replace")[:300]
+            except Exception:
+                err_body = ""
+            self.log.warning("Create: atlas-llm HTTP %d: %s", e.code, err_body)
+            return None
+        except Exception as e:
+            self.log.warning("Create: atlas-llm request failed (%s)", e)
+            return None
+        try:
+            choices = payload.get("choices") or []
+            if not choices:
+                self.log.info("Create: atlas-llm no choices in response")
+                return None
+            text = choices[0].get("message", {}).get("content", "") or ""
+        except Exception:
+            self.log.warning("Create: atlas-llm unexpected response shape")
+            return None
+        return self._clean_suffix(text)
+
+    def _expand_prompt(self, prompt):
+        suffix = self._expand_via_claude(prompt)
+        source = "claude"
+        if suffix is None:
+            self.log.info("Create: claude refused/failed, trying atlas-grok")
+            suffix = self._expand_via_atlas(prompt)
+            source = "atlas-grok"
+        if suffix is None:
+            self.log.info("Create: both expanders refused/failed, using original")
             return prompt
         combined = prompt.rstrip(",. ") + ", " + suffix
-        self.log.info("Create: expanded prompt: %r -> %r", prompt, combined)
+        self.log.info("Create: expanded via %s: %r -> %r", source, prompt, combined)
         return combined
 
     def _check_cap(self, irc, msg, cap_name):
@@ -325,16 +392,69 @@ class Create(callbacks.Plugin):
 
     # ------------------------------------------------------------------ !video
 
+    def _extract_seed(self, prompt):
+        """Return (seed_url, motion_text) if prompt contains a URL, else (None, prompt).
+
+        The URL is removed from the motion text; an empty motion text is
+        replaced with a generic default."""
+        m = SEED_URL_RE.search(prompt or "")
+        if not m:
+            return None, prompt
+        url = m.group(0).rstrip(".,;:!?)>]'\"")
+        motion = (prompt[:m.start()] + prompt[m.end():]).strip(" ,.;:-")
+        if not motion:
+            motion = DEFAULT_MOTION_PROMPT
+        return url, motion
+
+    def _resolve_url(self, url):
+        """Follow redirects (e.g. is.gd shortlinks) and return the final URL.
+
+        Best-effort: returns the input URL on any failure."""
+        try:
+            req = urllib.request.Request(
+                url, method="HEAD",
+                headers={"User-Agent": ATLAS_UA, "Accept": "*/*"},
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                return resp.geturl()
+        except Exception:
+            try:
+                req = urllib.request.Request(
+                    url, headers={"User-Agent": ATLAS_UA, "Range": "bytes=0-0"},
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    final = resp.geturl()
+                    return final
+            except Exception:
+                return url
+
     def video(self, irc, msg, args, prompt):
-        """<prompt> — Runware (SFW) image → Atlas Wan 2.2 Turbo I2V."""
+        """<prompt> — Runware (SFW) image → Atlas Wan 2.2 Turbo I2V.
+
+        If <prompt> contains a URL, that URL is used as the seed image
+        and the remaining text is treated as the motion description; the
+        Runware image step is skipped.
+        """
         if not self._check_cap(irc, msg, "generative"):
             return
         prompt = self._parse_prompt(irc, prompt, "video")
         if prompt is None:
             return
+        video_timeout = self.registryValue("videoTimeoutSec")
+        seed_url, motion = self._extract_seed(prompt)
+        if seed_url:
+            image_url = self._resolve_url(seed_url)
+            irc.reply("seed: " + self._shorten(image_url), prefixNick=False)
+            try:
+                video_url = self._atlas_i2v(motion, image_url, video_timeout)
+            except CreateError as e:
+                self.log.warning("Create.video video: %s", e)
+                irc.error("video step: " + str(e))
+                return
+            irc.reply(self._shorten(video_url), prefixNick=False)
+            return
         image_model = self.registryValue("picModel", msg.channel, irc.network)
         image_timeout = self.registryValue("timeoutSec")
-        video_timeout = self.registryValue("videoTimeoutSec")
         original = prompt
         prompt = self._expand_prompt(prompt)
         if prompt != original:
@@ -359,15 +479,32 @@ class Create(callbacks.Plugin):
     # -------------------------------------------------------------- !videonsfw
 
     def videonsfw(self, irc, msg, args, prompt):
-        """<prompt> — Runware NSFW image → Atlas Cloud Wan 2.2 Turbo Spicy I2V."""
+        """<prompt> — Runware NSFW image → Atlas Cloud Wan 2.2 Turbo Spicy I2V.
+
+        If <prompt> contains a URL, that URL is used as the seed image
+        and the remaining text is treated as the motion description; the
+        Runware image step is skipped.
+        """
         if not self._check_cap(irc, msg, "generative"):
             return
         prompt = self._parse_prompt(irc, prompt, "videonsfw")
         if prompt is None:
             return
+        video_timeout = self.registryValue("videoTimeoutSec")
+        seed_url, motion = self._extract_seed(prompt)
+        if seed_url:
+            image_url = self._resolve_url(seed_url)
+            irc.reply(NSFW_PREFIX + " seed: " + self._shorten(image_url), prefixNick=False)
+            try:
+                video_url = self._atlas_i2v(motion, image_url, video_timeout)
+            except CreateError as e:
+                self.log.warning("Create.videonsfw video: %s", e)
+                irc.error("video step: " + str(e))
+                return
+            irc.reply(NSFW_PREFIX + " " + self._shorten(video_url), prefixNick=False)
+            return
         image_model = self.registryValue("model", msg.channel, irc.network)
         image_timeout = self.registryValue("timeoutSec")
-        video_timeout = self.registryValue("videoTimeoutSec")
         original = prompt
         prompt = self._expand_prompt(prompt)
         if prompt != original:
