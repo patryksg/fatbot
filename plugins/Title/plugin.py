@@ -1,3 +1,4 @@
+import collections
 import html
 import http.cookiejar
 import ipaddress
@@ -11,6 +12,7 @@ import urllib.parse
 import supybot.callbacks as callbacks
 import supybot.ircdb as ircdb
 import supybot.ircmsgs as ircmsgs
+import supybot.ircutils as ircutils
 import supybot.utils as utils
 from supybot.commands import wrap
 
@@ -241,15 +243,225 @@ def _rewrite_for_fetch(url):
     return url
 
 
+_REDDIT_SUB_PATH_RE = re.compile(r'^/r/([A-Za-z0-9_]+)(?:/|$)')
+
+
+def _reddit_subreddit(url):
+    """If url is a reddit /r/<sub>/... link, return the subreddit name
+    (as it appears in the URL); else None."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return None
+    host = (parsed.hostname or '').lower()
+    if not (host == 'reddit.com' or host.endswith('.reddit.com')):
+        return None
+    m = _REDDIT_SUB_PATH_RE.match(parsed.path or '')
+    return m.group(1) if m else None
+
+
+def _strip_reddit_suffix(title, url):
+    """Old.reddit pages title posts as '<post title> : <subreddit>'.
+    Strip the trailing ' : <subreddit>' when the URL is a reddit /r/<sub>
+    link and the suffix matches that subreddit (case-insensitive)."""
+    if not title:
+        return title
+    sub = _reddit_subreddit(url)
+    if not sub:
+        return title
+    return re.sub(r'\s*:\s*' + re.escape(sub) + r'\s*$', '', title,
+                  flags=re.IGNORECASE).strip() or title
+
+
+# red ▲ on white bg, then white 'reddit' on red bg, then color reset.
+# Matches the visual weight of YouTube.prefix. Used by the reddit special
+# path — reddit interpolates /r/<sub> after the logo, so it isn't in the
+# brand dispatch table below.
+_REDDIT_LOGO = '\x0304,00 ▲ \x0300,04 reddit \x03 '
+
+
 _TWITTER_HOSTS = {'x.com', 'www.x.com', 'twitter.com', 'www.twitter.com',
                   'mobile.twitter.com'}
 _TWEET_PATH_RE = re.compile(r'^/[^/]+/status/(\d+)')
 
 
-def _fetch_tweet_via_fxapi(url, *, timeout):
+def _is_tweet_url(url):
+    """True iff url is a tweet status link (x.com/twitter.com /<user>/status/<id>)."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return False
+    host = (parsed.hostname or '').lower()
+    if host not in _TWITTER_HOSTS:
+        return False
+    return bool(_TWEET_PATH_RE.match(parsed.path or ''))
+
+
+# bold white X on black bg — matches X.com's branding. Tweets use a
+# dedicated formatter (handle + quoted text), so the X logo isn't in the
+# brand dispatch table.
+_X_LOGO = '\x0300,01\x02 𝕏 \x02\x03 '
+
+
+# ----------------------------------------------------------------------
+# Brand prefixes: data-driven dispatch for sites that should get a
+# colored logo and an optional title-suffix strip. Adding a new site is
+# one entry in _BRANDS — define a logo string, a tail/head regex, and a
+# host predicate built with _host_predicate().
+# ----------------------------------------------------------------------
+
+def _host_predicate(*, exact=(), suffix=(), labels=()):
+    """Return a callable(url) -> bool. The url's hostname (lowercased,
+    'www.' stripped) matches if it equals an entry in `exact`, or ends
+    with any string in `suffix` (a leading '.' matches both 'foo.com'
+    and 'sub.foo.com'), or contains any of `labels` as a DNS label
+    (useful for multi-TLD brands like ebay.* or amazon.*)."""
+    exact = frozenset(exact)
+    suffix = tuple(suffix)
+    labels = frozenset(labels)
+    def f(url):
+        try:
+            h = (urllib.parse.urlsplit(url).hostname or '').lower()
+        except ValueError:
+            return False
+        if not h:
+            return False
+        if h.startswith('www.'):
+            h = h[4:]
+        if h in exact:
+            return True
+        for s in suffix:
+            bare = s[1:] if s.startswith('.') else s
+            if h == bare or h.endswith(s):
+                return True
+        if labels and (set(h.split('.')) & labels):
+            return True
+        return False
+    return f
+
+
+Brand = collections.namedtuple('Brand', ['match', 'logo', 'tail_re', 'head_re'])
+
+
+def _strip_brand_suffix(brand, title):
+    """Strip leading head_re and trailing tail_re from title. Returns the
+    original title if stripping yields an empty string."""
+    if not title:
+        return title
+    t = title
+    if brand.head_re is not None:
+        t = brand.head_re.sub('', t)
+    if brand.tail_re is not None:
+        t = brand.tail_re.sub('', t)
+    return t.strip() or title
+
+
+# ----- Logo strings (mIRC: \x03FG,BG color, \x02 bold) -----
+_EBAY_LOGO = (
+    '\x02\x0304,01 e'    # red e
+    '\x0312,01b'         # blue b
+    '\x0308,01a'         # yellow a
+    '\x0303,01y \x03\x02 '  # green y, on black bg
+)
+_FB_LOGO       = '\x0300,12\x02 f \x02\x03 '
+_TIKTOK_LOGO   = '\x02\x0311,01 ♪\x0313,01♪ \x03\x02 '
+_IG_LOGO       = '\x02\x0313,01 I\x0307,01G \x03\x02 '
+_GH_LOGO       = '\x0300,01\x02 GH \x02\x03 '
+_BSKY_LOGO     = '\x0300,12\x02 🦋 \x02\x03 '
+_TWITCH_LOGO   = '\x0300,06\x02 Tw \x02\x03 '
+_IMDB_LOGO     = '\x0301,08\x02 IMDb \x02\x03 '
+_AMAZON_LOGO   = '\x0300,07\x02 a \x02\x03 '
+_STEAM_LOGO    = '\x0300,02\x02 ⛁ \x02\x03 '
+_THREADS_LOGO  = '\x0300,01\x02 @ \x02\x03 '
+_LINKEDIN_LOGO = '\x0300,12\x02 in \x02\x03 '
+_GITLAB_LOGO   = '\x0300,07\x02 GL \x02\x03 '
+_SPOTIFY_LOGO  = '\x0301,03\x02 ♫ \x02\x03 '
+_BANDCAMP_LOGO = '\x0300,10\x02 BC \x02\x03 '
+_SOUNDCLOUD_LOGO = '\x0300,07\x02 ☁ \x02\x03 '
+
+
+# ----- Title strip patterns (case-insensitive) -----
+_EBAY_TAIL     = re.compile(r'\s*[|\-:·]\s*eBay(?:\.[A-Za-z.]+)?\s*$', re.I)
+_FB_TAIL       = re.compile(r'\s*[|\-:·]\s*Facebook\s*$', re.I)
+_TIKTOK_TAIL   = re.compile(r'\s*[|\-:·]\s*TikTok\s*$', re.I)
+_IG_TAIL       = re.compile(
+    r'\s*[|\-:·•]\s*Instagram(?:\s+photos\s+and\s+videos)?\s*$', re.I)
+_GH_TAIL       = re.compile(r'\s*[|\-:·]\s*GitHub\s*$', re.I)
+_BSKY_TAIL     = re.compile(r'\s*(?:[|\-:·—]\s*Bluesky|on\s+Bluesky)\s*$', re.I)
+_TWITCH_TAIL   = re.compile(r'\s*[|\-:·]\s*Twitch\s*$', re.I)
+_IMDB_TAIL     = re.compile(r'\s*[|\-:·—]\s*IMDb\s*$', re.I)
+_AMAZON_TAIL   = re.compile(
+    r'\s*[|\-:·—–]\s*Amazon(?:\.[A-Za-z.]+)?\s*$', re.I)
+_AMAZON_HEAD   = re.compile(r'^Amazon(?:\.[A-Za-z.]+)?\s*:\s*', re.I)
+_STEAM_TAIL    = re.compile(r'\s*(?:on\s+Steam|[|\-:·]\s*Steam)\s*$', re.I)
+_THREADS_TAIL  = re.compile(
+    r'\s*(?:on\s+Threads|[|\-:·•]\s*Threads)\s*$', re.I)
+_LINKEDIN_TAIL = re.compile(r'\s*[|\-:·]\s*LinkedIn\s*$', re.I)
+_GITLAB_TAIL   = re.compile(r'\s*[|\-:·]\s*GitLab\s*$', re.I)
+_SPOTIFY_TAIL  = re.compile(r'\s*[|\-:·]\s*Spotify\s*$', re.I)
+_BANDCAMP_TAIL = re.compile(r'\s*[|\-:·]\s*Bandcamp\s*$', re.I)
+_SOUNDCLOUD_TAIL = re.compile(
+    r'\s*[|\-:·]\s*(?:Free\s+Listening\s+on\s+)?SoundCloud\s*$', re.I)
+
+
+_BRANDS = (
+    Brand(_host_predicate(labels={'ebay'}),
+          _EBAY_LOGO, _EBAY_TAIL, None),
+    Brand(_host_predicate(exact={'facebook.com', 'fb.com', 'fb.me'},
+                          suffix={'.facebook.com'}),
+          _FB_LOGO, _FB_TAIL, None),
+    Brand(_host_predicate(exact={'tiktok.com'}, suffix={'.tiktok.com'}),
+          _TIKTOK_LOGO, _TIKTOK_TAIL, None),
+    Brand(_host_predicate(exact={'instagram.com', 'instagr.am'},
+                          suffix={'.instagram.com'}),
+          _IG_LOGO, _IG_TAIL, None),
+    Brand(_host_predicate(exact={'github.com'}, suffix={'.github.com'}),
+          _GH_LOGO, _GH_TAIL, None),
+    Brand(_host_predicate(exact={'bsky.app'}, suffix={'.bsky.app'}),
+          _BSKY_LOGO, _BSKY_TAIL, None),
+    Brand(_host_predicate(exact={'twitch.tv'}, suffix={'.twitch.tv'}),
+          _TWITCH_LOGO, _TWITCH_TAIL, None),
+    Brand(_host_predicate(exact={'imdb.com'}, suffix={'.imdb.com'}),
+          _IMDB_LOGO, _IMDB_TAIL, None),
+    Brand(_host_predicate(labels={'amazon'},
+                          exact={'amzn.to', 'amzn.eu', 'amzn.com'}),
+          _AMAZON_LOGO, _AMAZON_TAIL, _AMAZON_HEAD),
+    Brand(_host_predicate(exact={'steamcommunity.com', 'steamdb.info'},
+                          suffix={'.steampowered.com',
+                                  '.steamcommunity.com'}),
+          _STEAM_LOGO, _STEAM_TAIL, None),
+    Brand(_host_predicate(exact={'threads.net', 'threads.com'},
+                          suffix={'.threads.net', '.threads.com'}),
+          _THREADS_LOGO, _THREADS_TAIL, None),
+    Brand(_host_predicate(exact={'linkedin.com', 'lnkd.in'},
+                          suffix={'.linkedin.com'}),
+          _LINKEDIN_LOGO, _LINKEDIN_TAIL, None),
+    Brand(_host_predicate(exact={'gitlab.com'}, suffix={'.gitlab.com'}),
+          _GITLAB_LOGO, _GITLAB_TAIL, None),
+    Brand(_host_predicate(exact={'spotify.com', 'spotify.link'},
+                          suffix={'.spotify.com', '.spotify.link'}),
+          _SPOTIFY_LOGO, _SPOTIFY_TAIL, None),
+    Brand(_host_predicate(exact={'bandcamp.com'},
+                          suffix={'.bandcamp.com'}),
+          _BANDCAMP_LOGO, _BANDCAMP_TAIL, None),
+    Brand(_host_predicate(exact={'soundcloud.com', 'snd.sc'},
+                          suffix={'.soundcloud.com'}),
+          _SOUNDCLOUD_LOGO, _SOUNDCLOUD_TAIL, None),
+)
+
+
+def _match_brand(url):
+    """Return the first Brand whose matcher accepts url, or None."""
+    for b in _BRANDS:
+        if b.match(url):
+            return b
+    return None
+
+
+def _fetch_tweet_data(url, *, timeout):
     """If url points at a tweet status, fetch its content via the
-    api.fxtwitter.com JSON endpoint and format it as
-    '@handle: "text"'. Returns None if not applicable or on error."""
+    api.fxtwitter.com JSON endpoint. Returns dict {'handle': str, 'text': str}
+    or None if not applicable / on error."""
     parsed = urllib.parse.urlsplit(url)
     host = (parsed.hostname or '').lower()
     if host not in _TWITTER_HOSTS:
@@ -282,9 +494,18 @@ def _fetch_tweet_via_fxapi(url, *, timeout):
     handle = (author.get('screen_name') or '').strip()
     if not text and not handle:
         return None
+    return {'handle': handle, 'text': text}
+
+
+def _fetch_tweet_via_fxapi(url, *, timeout):
+    """Legacy string form used by the manual .title command."""
+    d = _fetch_tweet_data(url, timeout=timeout)
+    if d is None:
+        return None
+    handle, text = d['handle'], d['text']
     if handle and text:
         return f'@{handle}: "{text}"'
-    return f'@{handle}' if handle else text or None
+    return f'@{handle}' if handle else (text or None)
 
 
 def fetch_title(url, *, timeout=6.0, max_bytes=262144, user_agent=None,
@@ -328,7 +549,8 @@ def fetch_title(url, *, timeout=6.0, max_bytes=262144, user_agent=None,
     if 'html' not in ct.lower() and 'xml' not in ct.lower():
         return None
     body = getattr(r, '_cached_body', b'') or b''
-    return _decode_title(body, ct)
+    title = _decode_title(body, ct)
+    return _strip_reddit_suffix(title, url)
 
 
 def _truncate_bytes(s, limit):
@@ -337,6 +559,22 @@ def _truncate_bytes(s, limit):
         return s
     cut_at = max(0, limit - 3)
     cut = enc[:cut_at].decode('utf-8', errors='ignore').rstrip()
+    return cut + '…'
+
+
+def _truncate_text_word_aware(text, byte_budget):
+    """Truncate `text` to fit within byte_budget UTF-8 bytes, preferring
+    to break on a whitespace boundary. Appends '…' when truncation occurs."""
+    enc = text.encode('utf-8')
+    if len(enc) <= byte_budget:
+        return text
+    cut_at = max(0, byte_budget - 3)  # 3 bytes for '…'
+    cut = enc[:cut_at].decode('utf-8', errors='ignore').rstrip()
+    # Walk back to the last whitespace, but don't sacrifice too much text:
+    # only honour the boundary if it lies within the final ~30 chars.
+    i = cut.rfind(' ')
+    if i >= 0 and (len(cut) - i) <= 30:
+        cut = cut[:i].rstrip(' ,;:.!?-—–"\'')
     return cut + '…'
 
 
@@ -402,7 +640,7 @@ class Title(callbacks.Plugin):
 
     def __init__(self, irc):
         super().__init__(irc)
-        self._recent = _RecentURLs(ttl=60)
+        self._recent = _RecentURLs(ttl=10)
         self._rate = _RateLimiter(nick_cooldown=20.0, chan_window=30.0, chan_max=3)
         if not _HAVE_CURLCFFI:
             self.log.warning(
@@ -479,37 +717,94 @@ class Title(callbacks.Plugin):
             self.log.exception('ShrinkUrl integration failed for %s', url)
             return None
 
+    def _format_tweet_line(self, tweet, short, max_len):
+        """Assemble the snarfer line for a tweet, word-truncating the body
+        to fit the byte budget and keeping the closing quote intact."""
+        handle = (tweet.get('handle') or '').strip()
+        text = (tweet.get('text') or '').strip()
+
+        prefix = _X_LOGO
+        if handle:
+            prefix = f"{prefix}@{handle}: "
+
+        suffix = ''
+        if short:
+            suffix = f' | {ircutils.mircColor(short, "12")}'
+
+        if not text:
+            return f"{prefix.rstrip()}{suffix}"
+
+        overhead = len((prefix + '""' + suffix).encode('utf-8'))
+        budget = max(1, max_len - overhead)
+        body = _truncate_text_word_aware(text, budget)
+        return f'{prefix}"{body}"{suffix}'
+
     def _do_fetch(self, irc, channel, url):
         network = irc.network
-        try:
-            title = fetch_title(
-                url,
-                timeout=self.registryValue('timeout'),
-                max_bytes=self.registryValue('maxBytes'),
-                cookies_file=self.registryValue('cookiesFile') or None)
-        except Exception:
-            self.log.exception('Error snarfing %s', url)
-            title = None
+        max_len = self.registryValue('maxLength')
+        is_tweet = _is_tweet_url(url)
+
+        tweet = None
+        title = None
+        if is_tweet:
+            try:
+                tweet = _fetch_tweet_data(
+                    url, timeout=self.registryValue('timeout'))
+            except Exception:
+                self.log.exception('Error snarfing tweet %s', url)
+                tweet = None
+        else:
+            try:
+                title = fetch_title(
+                    url,
+                    timeout=self.registryValue('timeout'),
+                    max_bytes=self.registryValue('maxBytes'),
+                    cookies_file=self.registryValue('cookiesFile') or None)
+            except Exception:
+                self.log.exception('Error snarfing %s', url)
+                title = None
 
         short = None
         if self.registryValue('useShrinkUrl', channel, network):
             short = self._shorten_via_shrinkurl(irc, channel, network, url)
 
-        if short and title:
-            line = f"{short} | {title}"
-        elif title:
-            fmt = self.registryValue('format', channel, network) or ':: %s'
-            try:
-                line = fmt % title
-            except (TypeError, ValueError):
-                line = ':: ' + title
-        elif short:
-            line = short
+        sub = _reddit_subreddit(url)
+        brand = _match_brand(url)
+
+        if is_tweet and tweet is not None:
+            line = self._format_tweet_line(tweet, short, max_len)
+        elif brand is not None and title:
+            title = _strip_brand_suffix(brand, title)
+            if short:
+                colored_short = ircutils.mircColor(short, '12')
+                line = f"{brand.logo}{title} | {colored_short}"
+            else:
+                line = f"{brand.logo}{title}"
+            line = _truncate_bytes(line, max_len)
         else:
-            return
+            title_first = bool(sub)
+            if short and title:
+                colored_short = ircutils.mircColor(short, '12')
+                if title_first:
+                    line = f"{title} | {colored_short}"
+                else:
+                    line = f"{colored_short} | {title}"
+            elif title:
+                # Plain bare title — no '::' prefix; the logo-prefixed
+                # paths above already cover the cases where a marker is
+                # useful. The legacy Title.format setting is ignored.
+                line = title
+            elif short:
+                line = short
+            else:
+                return
+
+            if sub:
+                line = f"{_REDDIT_LOGO}{ircutils.bold(f'/r/{sub}')} · {line}"
+
+            line = _truncate_bytes(line, max_len)
 
         line = line.replace('\r', ' ').replace('\n', ' ').replace('\x00', '')
-        line = _truncate_bytes(line, self.registryValue('maxLength'))
         irc.queueMsg(ircmsgs.privmsg(channel, line))
 
     def title(self, irc, msg, args, url):
