@@ -27,8 +27,11 @@ except Exception:
 # Limnoria's utils.web.httpUrlRe mis-parses URLs containing '@' in the path
 # (e.g. Google Maps coordinates like /maps/@lat,lon) because its optional
 # userinfo group (\S+@) gets consumed by the path. Use a permissive matcher
-# that just stops at whitespace or closing brackets.
-_HTTP_URL_RE = re.compile(r'https?://[^\s\])>]+')
+# that just stops at whitespace or closing brackets. Balanced (...) is
+# allowed inside the URL so Wikipedia disambiguators like
+# /wiki/Foo_(footballer) are captured intact, while a trailing ')' that
+# only wraps the URL in prose still stops the match.
+_HTTP_URL_RE = re.compile(r'https?://(?:\([^\s()<>\]]*\)|[^\s()<>\]])+')
 
 # Skip URLs whose path ends in an obvious media/binary extension — no
 # point fetching or shortening these (no <title>, the resulting
@@ -64,6 +67,31 @@ _MAX_HOPS = 5
 _session_lock = threading.Lock()
 _session = None
 _cookies_loaded = None  # (path, mtime) of the file loaded into _session
+
+# Localhost Cloudflare WARP SOCKS5 proxy. Used as a retry route when a
+# direct fetch returns a bot-challenge page (PerimeterX / Cloudflare /
+# Akamai) — the WARP egress often gets the real content. See
+# project_skund_cloudflare_warp.
+_WARP_PROXY = 'socks5h://127.0.0.1:40000'
+_WARP_PROXIES = {'http': _WARP_PROXY, 'https': _WARP_PROXY}
+
+# <title> values served by common anti-bot interstitials. If we extract one
+# of these, the direct fetch lost to the gate and we should retry via WARP.
+_BOT_CHALLENGE_TITLE_RE = re.compile(
+    r'^\s*(?:'
+    r'client challenge'
+    r'|just a moment'
+    r'|attention required'
+    r'|checking your browser'
+    r'|access denied'
+    r'|verify you are a human'
+    r'|please wait\.\.\.'
+    r')',
+    re.IGNORECASE)
+
+
+def _is_challenge_title(title):
+    return bool(title) and bool(_BOT_CHALLENGE_TITLE_RE.match(title))
 
 
 def _maybe_load_cookies(path):
@@ -161,7 +189,8 @@ def _decode_title(body, content_type):
     return title
 
 
-def _do_one_get(url, referer, timeout, max_bytes, cookies_file=None):
+def _do_one_get(url, referer, timeout, max_bytes, cookies_file=None,
+                force_warp=False):
     """Single GET via the shared curl_cffi Session, no auto-redirects.
     Returns (response_or_None, parsed_url_or_None).
 
@@ -181,10 +210,11 @@ def _do_one_get(url, referer, timeout, max_bytes, cookies_file=None):
             _session = cc.Session(impersonate=_IMPERSONATE)
         _maybe_load_cookies(cookies_file)
         try:
-            r = _session.get(
-                url, timeout=timeout, allow_redirects=False,
-                headers=headers, stream=True,
-            )
+            kw = dict(timeout=timeout, allow_redirects=False,
+                      headers=headers, stream=True)
+            if force_warp:
+                kw['proxies'] = _WARP_PROXIES
+            r = _session.get(url, **kw)
             try:
                 # Bail before downloading the body on image/video/audio
                 # responses. Headers are available pre-body when streaming.
@@ -210,7 +240,8 @@ def _do_one_get(url, referer, timeout, max_bytes, cookies_file=None):
     return r, parsed
 
 
-def _walk_redirects(url, *, timeout, max_bytes, referer=None, cookies_file=None):
+def _walk_redirects(url, *, timeout, max_bytes, referer=None, cookies_file=None,
+                    force_warp=False):
     """Walk up to _MAX_HOPS redirects, re-validating the host on each hop.
     Returns (final_response, final_parsed) or None on failure."""
     visited = set()
@@ -220,7 +251,8 @@ def _walk_redirects(url, *, timeout, max_bytes, referer=None, cookies_file=None)
         if cur in visited:
             return None
         visited.add(cur)
-        r, parsed = _do_one_get(cur, cur_referer, timeout, max_bytes, cookies_file)
+        r, parsed = _do_one_get(cur, cur_referer, timeout, max_bytes,
+                                cookies_file, force_warp=force_warp)
         if r is None:
             return None
         if r.status_code not in (301, 302, 303, 307, 308):
@@ -273,11 +305,11 @@ def _strip_reddit_suffix(title, url):
                   flags=re.IGNORECASE).strip() or title
 
 
-# red ▲ on white bg, then white 'reddit' on red bg, then color reset.
+# orange ▲ on white bg, then white 'reddit' on orange bg, then color reset.
 # Matches the visual weight of YouTube.prefix. Used by the reddit special
 # path — reddit interpolates /r/<sub> after the logo, so it isn't in the
 # brand dispatch table below.
-_REDDIT_LOGO = '\x0304,00 ▲ \x0300,04 reddit \x03 '
+_REDDIT_LOGO = '\x0307,00 ▲ \x0300,07 reddit \x03 '
 
 
 _TWITTER_HOSTS = {'x.com', 'www.x.com', 'twitter.com', 'www.twitter.com',
@@ -378,6 +410,17 @@ _GITLAB_LOGO   = '\x0300,07\x02 GL \x02\x03 '
 _SPOTIFY_LOGO  = '\x0301,03\x02 ♫ \x02\x03 '
 _BANDCAMP_LOGO = '\x0300,10\x02 BC \x02\x03 '
 _SOUNDCLOUD_LOGO = '\x0300,07\x02 ☁ \x02\x03 '
+_IMGUR_LOGO    = '\x0309,01\x02 i. \x02\x03 '
+_BBC_LOGO      = '\x0300,04\x02 BBC \x02\x03 '
+_CNN_LOGO      = '\x0300,04\x02 CNN \x02\x03 '
+_NYT_LOGO      = '\x0300,01\x02 NYT \x02\x03 '
+_GUARDIAN_LOGO = '\x0300,02\x02 G \x02\x03 '
+_SPIEGEL_LOGO  = '\x0300,04\x02 S \x02\x03 '
+_TAGESSCHAU_LOGO = '\x0300,02\x02 TS \x02\x03 '
+_HEISE_LOGO    = '\x0300,04\x02 h: \x02\x03 '
+_HN_LOGO       = '\x0301,07\x02 Y \x02\x03 '
+_WIKIPEDIA_LOGO = '\x0301,00\x02 W \x02\x03 '
+_ZDNET_LOGO    = '\x0301,09\x02 ZD \x02\x03 '
 
 
 # ----- Title strip patterns (case-insensitive) -----
@@ -402,6 +445,30 @@ _SPOTIFY_TAIL  = re.compile(r'\s*[|\-:·]\s*Spotify\s*$', re.I)
 _BANDCAMP_TAIL = re.compile(r'\s*[|\-:·]\s*Bandcamp\s*$', re.I)
 _SOUNDCLOUD_TAIL = re.compile(
     r'\s*[|\-:·]\s*(?:Free\s+Listening\s+on\s+)?SoundCloud\s*$', re.I)
+_IMGUR_TAIL    = re.compile(
+    r'\s*(?:[|\-:·—]\s*(?:Album\s+on\s+)?Imgur|on\s+Imgur)\s*$', re.I)
+_IMGUR_HEAD    = re.compile(r'^Imgur\s*:\s*', re.I)
+_BBC_TAIL      = re.compile(
+    r'\s*[|\-:·—]\s*BBC(?:\s+(?:News|Sport|Weather|iPlayer|Sounds))?\s*$',
+    re.I)
+_CNN_TAIL      = re.compile(
+    r'\s*[|\-:·—]\s*CNN(?:\s+(?:Business|Politics|Health|Style|Travel))?\s*$',
+    re.I)
+_NYT_TAIL      = re.compile(
+    r'\s*[|\-:·—–]\s*The\s+New\s+York\s+Times\s*$', re.I)
+_GUARDIAN_TAIL = re.compile(
+    r'\s*[|\-:·—–]\s*The\s+Guardian\s*$', re.I)
+_SPIEGEL_TAIL  = re.compile(
+    r'\s*[|\-:·—–]\s*DER\s+SPIEGEL\s*$', re.I)
+_TAGESSCHAU_TAIL = re.compile(
+    r'\s*[|\-:·—]\s*tagesschau(?:\.de)?\s*$', re.I)
+_HEISE_TAIL    = re.compile(
+    r'\s*[|\-:·—]\s*heise(?:\s+online|\+)?\s*$', re.I)
+_HN_TAIL       = re.compile(
+    r'\s*[|\-:·—]\s*Hacker\s+News\s*$', re.I)
+_WIKIPEDIA_TAIL = re.compile(
+    r'\s*[|\-:·—–]\s*Wikipedia(?:,\s+the\s+free\s+encyclopedia)?\s*$', re.I)
+_ZDNET_TAIL    = re.compile(r'\s*[|\-:·—–]\s*ZDNET\s*$', re.I)
 
 
 _BRANDS = (
@@ -447,6 +514,35 @@ _BRANDS = (
     Brand(_host_predicate(exact={'soundcloud.com', 'snd.sc'},
                           suffix={'.soundcloud.com'}),
           _SOUNDCLOUD_LOGO, _SOUNDCLOUD_TAIL, None),
+    Brand(_host_predicate(exact={'imgur.com'}, suffix={'.imgur.com'}),
+          _IMGUR_LOGO, _IMGUR_TAIL, _IMGUR_HEAD),
+    Brand(_host_predicate(exact={'bbc.com', 'bbc.co.uk'},
+                          suffix={'.bbc.com', '.bbc.co.uk'}),
+          _BBC_LOGO, _BBC_TAIL, None),
+    Brand(_host_predicate(exact={'cnn.com', 'cnn.it'},
+                          suffix={'.cnn.com'}),
+          _CNN_LOGO, _CNN_TAIL, None),
+    Brand(_host_predicate(exact={'nytimes.com', 'nyti.ms'},
+                          suffix={'.nytimes.com'}),
+          _NYT_LOGO, _NYT_TAIL, None),
+    Brand(_host_predicate(exact={'theguardian.com', 'guardian.co.uk'},
+                          suffix={'.theguardian.com', '.guardian.co.uk'}),
+          _GUARDIAN_LOGO, _GUARDIAN_TAIL, None),
+    Brand(_host_predicate(exact={'spiegel.de'},
+                          suffix={'.spiegel.de'}),
+          _SPIEGEL_LOGO, _SPIEGEL_TAIL, None),
+    Brand(_host_predicate(exact={'tagesschau.de'},
+                          suffix={'.tagesschau.de'}),
+          _TAGESSCHAU_LOGO, _TAGESSCHAU_TAIL, None),
+    Brand(_host_predicate(exact={'heise.de'},
+                          suffix={'.heise.de'}),
+          _HEISE_LOGO, _HEISE_TAIL, None),
+    Brand(_host_predicate(exact={'news.ycombinator.com'}),
+          _HN_LOGO, _HN_TAIL, None),
+    Brand(_host_predicate(suffix={'.wikipedia.org'}),
+          _WIKIPEDIA_LOGO, _WIKIPEDIA_TAIL, None),
+    Brand(_host_predicate(labels={'zdnet'}),
+          _ZDNET_LOGO, _ZDNET_TAIL, None),
 )
 
 
@@ -508,22 +604,11 @@ def _fetch_tweet_via_fxapi(url, *, timeout):
     return f'@{handle}' if handle else (text or None)
 
 
-def fetch_title(url, *, timeout=6.0, max_bytes=262144, user_agent=None,
-                cookies_file=None):
-    """Fetch the HTML <title> for url. user_agent is ignored when curl_cffi
-    is available — impersonation dictates the headers."""
-    if not _HAVE_CURLCFFI:
-        return None
-    tweet = _fetch_tweet_via_fxapi(url, timeout=timeout)
-    if tweet is not None:
-        return tweet
-    url = _rewrite_for_fetch(url)
-    parsed_init = urllib.parse.urlsplit(url)
-    if parsed_init.scheme not in ('http', 'https'):
-        return None
-
+def _attempt_fetch_title(url, *, timeout, max_bytes, cookies_file, force_warp):
+    """One full fetch attempt (walk + warmup-on-403 + decode). Returns the
+    cleaned title string, or None if this route couldn't produce one."""
     walk = _walk_redirects(url, timeout=timeout, max_bytes=max_bytes,
-                           cookies_file=cookies_file)
+                           cookies_file=cookies_file, force_warp=force_warp)
     if walk is None:
         return None
     r, parsed = walk
@@ -533,9 +618,11 @@ def fetch_title(url, *, timeout=6.0, max_bytes=262144, user_agent=None,
         # root, which sets bot-manager cookies; then retry the original URL
         # with a Referer.
         warm_url = f"{parsed.scheme}://{parsed.hostname}/"
-        _do_one_get(warm_url, None, timeout, max_bytes, cookies_file)
+        _do_one_get(warm_url, None, timeout, max_bytes, cookies_file,
+                    force_warp=force_warp)
         walk = _walk_redirects(url, timeout=timeout, max_bytes=max_bytes,
-                               referer=warm_url, cookies_file=cookies_file)
+                               referer=warm_url, cookies_file=cookies_file,
+                               force_warp=force_warp)
         if walk is None:
             return None
         r, parsed = walk
@@ -551,6 +638,39 @@ def fetch_title(url, *, timeout=6.0, max_bytes=262144, user_agent=None,
     body = getattr(r, '_cached_body', b'') or b''
     title = _decode_title(body, ct)
     return _strip_reddit_suffix(title, url)
+
+
+def fetch_title(url, *, timeout=6.0, max_bytes=262144, user_agent=None,
+                cookies_file=None):
+    """Fetch the HTML <title> for url. user_agent is ignored when curl_cffi
+    is available — impersonation dictates the headers.
+
+    Two-pass strategy: try a direct fetch first; if it fails outright or
+    comes back with a bot-challenge title, retry once via the local WARP
+    SOCKS5 proxy. Most sites are fine direct; the WARP retry rescues hosts
+    whose bot-protection blacklists our VPS egress IP."""
+    if not _HAVE_CURLCFFI:
+        return None
+    tweet = _fetch_tweet_via_fxapi(url, timeout=timeout)
+    if tweet is not None:
+        return tweet
+    url = _rewrite_for_fetch(url)
+    parsed_init = urllib.parse.urlsplit(url)
+    if parsed_init.scheme not in ('http', 'https'):
+        return None
+
+    direct = _attempt_fetch_title(url, timeout=timeout, max_bytes=max_bytes,
+                                  cookies_file=cookies_file, force_warp=False)
+    if direct is not None and not _is_challenge_title(direct):
+        return direct
+
+    warp = _attempt_fetch_title(url, timeout=timeout, max_bytes=max_bytes,
+                                cookies_file=cookies_file, force_warp=True)
+    if warp is not None and not _is_challenge_title(warp):
+        return warp
+    # Neither route produced real content. Suppress the bot-challenge
+    # string entirely rather than posting it.
+    return None
 
 
 def _truncate_bytes(s, limit):
@@ -579,8 +699,21 @@ def _truncate_text_word_aware(text, byte_budget):
 
 
 def _strip_trailing_punct(url):
-    while url and url[-1] in _TRAILING_PUNCT:
-        url = url[:-1]
+    while url:
+        c = url[-1]
+        if c == ')':
+            # Keep a trailing ')' if it balances a '(' inside the URL —
+            # Wikipedia disambiguators like /Foo_(footballer) would
+            # otherwise be truncated to /Foo_(footballer with no
+            # closing paren. Strip it only if there is no matching '('.
+            if url.count('(') > url.count(')') - 1:
+                break
+            url = url[:-1]
+            continue
+        if c in _TRAILING_PUNCT:
+            url = url[:-1]
+            continue
+        break
     return url
 
 

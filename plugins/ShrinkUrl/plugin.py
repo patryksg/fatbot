@@ -55,6 +55,7 @@ _WARP_SOCKS_PROXY = 'socks5h://127.0.0.1:40000'
 import supybot.log as log
 import supybot.conf as conf
 import supybot.utils as utils
+import supybot.world as world
 from supybot.commands import *
 import supybot.ircmsgs as ircmsgs
 import supybot.plugins as plugins
@@ -123,9 +124,42 @@ class ShrinkUrl(callbacks.PluginRegexp):
         self.__parent = super(ShrinkUrl, self)
         self.__parent.__init__(irc)
         self.db = ShrunkenUrlDB()
+        # Per-service timestamp of the last NOTICE sent to psg, used to
+        # rate-limit fallback notifications so a sustained outage does not
+        # generate one message per snarf.
+        self._lastNotify = {}
 
     def die(self):
         self.db.close()
+
+    _notifyTarget = 'psg'
+    _notifyMinIntervalSec = 1800  # 30 minutes per service
+
+    def _notifyPsg(self, service, message):
+        """Send a rate-limited NOTICE to psg about a fallback/error in this
+        plugin. `service` keys the rate-limit bucket (e.g. 'isgd', 'tly').
+        """
+        try:
+            now = time.time()
+            last = self._lastNotify.get(service, 0)
+            if now - last < self._notifyMinIntervalSec:
+                return
+            self._lastNotify[service] = now
+            text = '[ShrinkUrl] %s: %s' % (service, message)
+            sent = False
+            for ircObj in list(world.ircs):
+                try:
+                    ircObj.queueMsg(ircmsgs.notice(self._notifyTarget, text))
+                    sent = True
+                except Exception:
+                    log.exception(
+                        'ShrinkUrl: notify failed on network %r',
+                        getattr(ircObj, 'network', '?'))
+            if not sent:
+                log.warning('ShrinkUrl: no IRC connection to notify %s: %s',
+                            self._notifyTarget, text)
+        except Exception:
+            log.exception('ShrinkUrl: _notifyPsg outer failure')
 
     def _cleanUrl(self, url):
         if not _unalix_available:
@@ -356,10 +390,12 @@ class ShrinkUrl(callbacks.PluginRegexp):
             return self.db.get('isgd', url)
         except KeyError:
             pass
-        # Try is.gd through the WARP SOCKS5 proxy. On any failure (proxy
-        # down, network error, is.gd error/maintenance), fall back to
-        # tinyurl via direct egress so the bot stays useful.
+        # Try is.gd via WARP SOCKS5 proxy. On failure, fall back through
+        # t.ly, then tinyurl, so the bot keeps producing a short URL even
+        # if two of the three providers are down. psg gets notified
+        # (rate-limited) whenever a fallback kicks in.
         link = None
+        isgd_err = None
         if _requests_available:
             try:
                 r = _requests.get(
@@ -375,18 +411,40 @@ class ShrinkUrl(callbacks.PluginRegexp):
                     if text.startswith('http://') or text.startswith('https://'):
                         link = text
                     else:
-                        log.warning('is.gd non-URL response: %r', text[:200])
+                        isgd_err = 'non-URL response: %s' % text[:160]
+                        log.warning('is.gd %s', isgd_err)
                 else:
-                    log.warning(
-                        'is.gd HTTP %s (likely proxy/blocked): %r',
-                        r.status_code, r.text[:200])
-            except Exception:
+                    isgd_err = 'HTTP %s: %s' % (r.status_code, r.text[:160])
+                    log.warning('is.gd %s', isgd_err)
+            except Exception as e:
+                isgd_err = '%s: %s' % (type(e).__name__, e)
                 log.exception('is.gd via WARP proxy failed; falling back')
         else:
+            isgd_err = 'requests module unavailable'
             log.warning('requests module unavailable; is.gd fallback path')
 
         if link is None:
-            link = self._getTinyUrl(url)
+            self._notifyPsg(
+                'isgd',
+                'is.gd failed (%s); falling back to t.ly' % isgd_err)
+            try:
+                link = self._getTlyUrl(url)
+            except Exception as e:
+                tly_err = '%s: %s' % (type(e).__name__, e)
+                log.exception('t.ly fallback failed; trying tinyurl')
+                self._notifyPsg(
+                    'tly',
+                    't.ly fallback failed (%s); falling back to tinyurl'
+                    % tly_err)
+                try:
+                    link = self._getTinyUrl(url)
+                except Exception as e:
+                    tiny_err = '%s: %s' % (type(e).__name__, e)
+                    self._notifyPsg(
+                        'tinyurl',
+                        'tinyurl fallback ALSO failed (%s); no short URL '
+                        'produced' % tiny_err)
+                    raise
         self.db.set('isgd', url, link)
         return link
 
@@ -394,8 +452,9 @@ class ShrinkUrl(callbacks.PluginRegexp):
     def isgd(self, irc, msg, args, url):
         """<url>
 
-        Returns an is.gd version of <url>. Falls back to tinyurl.com if
-        is.gd is unreachable (e.g. the WARP proxy is down).
+        Returns an is.gd version of <url>. Falls back to t.ly, then
+        tinyurl.com, if upstream providers are unreachable. psg is
+        notified (rate-limited) when a fallback is used.
         """
         try:
             isgdurl = self._getIsgdUrl(url)
