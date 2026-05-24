@@ -23,3 +23,13 @@ conf.registerGlobalValue(Create, 'videoTimeoutSec',
 conf.registerChannelValue(Create, 'picModel',
     registry.String('civitai:133005@1759168',
         'Runware AIR for !pic and seed image of !video (default: Juggernaut XL v11, SFW-tauglich).'))
+
+conf.registerChannelValue(Create, 'editModel',
+    registry.String('bfl:3@1',
+        'Runware AIR for !pic/!picnsfw image editing when an image URL is given '
+        '(default: FLUX.1 Kontext [pro], instruction-based edit, ~$0.04/image).'))
+
+conf.registerChannelValue(Create, 'editStrength',
+    registry.Probability(0.6,
+        'img2img strength for the uncensored !picnsfw edit fallback used when '
+        'Kontext refuses NSFW (lower = closer to the original image).'))

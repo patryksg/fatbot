@@ -70,8 +70,8 @@ _cookies_loaded = None  # (path, mtime) of the file loaded into _session
 
 # Localhost Cloudflare WARP SOCKS5 proxy. Used as a retry route when a
 # direct fetch returns a bot-challenge page (PerimeterX / Cloudflare /
-# Akamai) — the WARP egress often gets the real content. See
-# project_skund_cloudflare_warp.
+# Akamai) — the WARP egress often gets the real content. Configure a local
+# WARP proxy on this port (warp-svc --proxy) to enable the retry path.
 _WARP_PROXY = 'socks5h://127.0.0.1:40000'
 _WARP_PROXIES = {'http': _WARP_PROXY, 'https': _WARP_PROXY}
 

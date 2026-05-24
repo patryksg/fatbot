@@ -20,7 +20,9 @@ CONFIG_DIR = "/home/botuser/runbot/.claude"
 MCP_CONFIG = "/home/botuser/runbot/plugins/Claude/mcp-imageview.json"
 MODEL = "claude-haiku-4-5-20251001"
 OPUS_MODEL = "claude-opus-4-7"
-MAX_LINES_SMART = 3
+MAX_LINES_SMART = 5
+MAX_LINES_NORMAL = 4
+SMART_THINKING_TOKENS = 4000
 TIMEOUT_SEC = 150
 MAX_CHARS = 380
 
@@ -480,7 +482,7 @@ class Claude(callbacks.Plugin):
             max_lines = MAX_LINES_SMART
         else:
             model = MODEL
-            max_lines = 1
+            max_lines = MAX_LINES_NORMAL
         system_prompt = _build_system_prompt(max_lines)
         help_addendum = self._owner_help_addendum(msg)
         system_prompt = system_prompt + help_addendum
@@ -514,6 +516,8 @@ class Claude(callbacks.Plugin):
         gemini_key = os.environ.get("GEMINI_API_KEY")
         if gemini_key:
             env["GEMINI_API_KEY"] = gemini_key
+        if mode == 'opus':
+            env["MAX_THINKING_TOKENS"] = str(SMART_THINKING_TOKENS)
         cmd = [
             CLAUDE_BIN,
             "-p",

@@ -39,9 +39,9 @@ pipx inject limnoria PySocks --pip-args="--no-deps"
   Cloudflare). Single shared `cc.Session()`, cookie jar persistence, SSRF
   guard via `getaddrinfo`.
 - **`PySocks`** — required for `socks5h://` URLs in requests/urllib, used
-  by ShrinkUrl's `_getIsgdUrl` to route through cloudflare-warp.
+  for the optional cloudflare-warp retry/egress path (see below).
 
-### System: cloudflare-warp (SOCKS5 proxy mode)
+### System: cloudflare-warp (SOCKS5 proxy mode, optional)
 
 Debian package `cloudflare-warp` (repo
 `https://pkg.cloudflareclient.com bookworm main`, signed-by
@@ -51,10 +51,20 @@ Debian package `cloudflare-warp` (repo
 route.** A default-route ("warp" mode) install will kill SSH because
 warp injects a tunnel interface and reroutes all egress.
 
-**Why:** is.gd is fronted by Cloudflare's anti-bot challenge and blocks
-VPS egress IPs with HTTP 403. Routing only is.gd traffic through
-WARP returns the actual short URL. Everything else (t.ly, reddit,
-fxtwitter, ...) continues to use the normal VPS egress.
+**Why:** some sites block VPS egress IPs with an anti-bot challenge
+(Cloudflare / PerimeterX / Akamai) or geo/HTTP 403. Routing only those
+specific requests through WARP returns the real content; everything
+else keeps using the normal VPS egress.
+
+**Consumers:**
+
+- **Title** — when a direct fetch returns a bot-challenge page, the
+  plugin transparently retries once through WARP (see "Title" below).
+- **Wikibear** — shortens long URLs in its replies via is.gd through
+  WARP.
+
+If WARP is disconnected both paths degrade gracefully: Title falls back
+to the challenge title, Wikibear leaves the long URL untouched.
 
 **Setup / recovery sequence:**
 
@@ -78,10 +88,6 @@ warp-cli --accept-tos connect
 **Persistence:** `warp-svc.service` is enabled; `Always On: true` in
 settings; `reg.json` + `settings.json` in `/var/lib/cloudflare-warp/`
 persist registration and mode across reboots.
-
-**Consumer:** only `plugins/ShrinkUrl/plugin.py::_getIsgdUrl`. If WARP
-is disconnected, that path falls back to tinyurl via direct egress —
-the bot stays functional, just no is.gd links.
 
 ## systemd
 
@@ -140,23 +146,35 @@ ChannelLogger (stock) is also loaded but does not appear in the
 
 Custom plugins currently installed:
 
-- **ChanModes** — auto-asserts a configured mode string when bot has +o
-- **Claude** — Claude-API-backed chat / Q&A. Per-channel mode is one of
-  `claude` / `smart` / `gem`, switched via `!claude` / `!smart` / `!gem`
-  (capability-gated). When the `claude` subprocess exits with a
-  rate-limit / quota-exhausted error and `geminiFallback` is enabled for
-  the channel, the plugin posts `(claude out of tokens — switching to
-  gem)`, flips the channel mode to `gem`, and answers via Gemini Flash
-  (`gemini-2.5-flash`, marked with a trailing `(gem)`). The channel
-  stays on `gem` until someone runs `!claude` / `!smart` again. See
-  [Claude plugin security](#claude-plugin-security)
-- **Greeter**, **Hamster**, **InfoToggle**, **Relay** — utility plugins
-- **ShrinkUrl** — overridden to default to is.gd via cloudflare-warp
-  SOCKS5; falls back to tinyurl
-- **Title** — URL-title snarfer using `curl_cffi`; combined-mode with
-  ShrinkUrl posts `<short> | <title>`; reddit/twitter special-cased
-  (rewrites to `old.reddit.com`, uses `api.fxtwitter.com`)
-- **YouTube** — yt-dlp-backed metadata fetcher
+- **ChanModes** — auto-enforces a configured channel-mode string whenever
+  the bot has ops (`!config channel #foo plugins.ChanModes.modes +pnst`)
+- **Claude** — Claude Code CLI-backed chat / Q&A relayed to the channel;
+  see [Claude plugin security](#claude-plugin-security)
+- **Create** — image/video generation. `!pic` / `!picnsfw` (Runware.ai
+  SDXL; with an image URL + instruction, edits it via FLUX.1 Kontext) and
+  `!video` / `!videonsfw` (Runware seed image → Atlas Cloud I2V). Gated on
+  the per-channel `generative` capability.
+- **Greeter** — greets registered users on join (`!addgreet`, `!delgreet`,
+  `!listgreets`)
+- **Hamster** — posts a periodic random one-liner to the channel
+- **InfoToggle** — owner-only admin shortcuts: `!info`, `!ai`, `!chanmode`,
+  `!chancap`, `!unchancap`, `!adduser`, `!deluser`, `!cap`, `!remcap`
+- **Relay** — one-way relay of public chat from a second channel into the
+  main one
+- **Repo** — `!repo` / `!howto` reply with this GitHub repo and the install
+  guide URL
+- **ShrinkUrl** — overridden so the `tly` service is a fallback chain
+  t.ly → tinyurl → x0.no (no is.gd); default service is `tly`. URLs are
+  cleaned of tracking params via `unalix` before shortening.
+- **Title** — URL-title snarfer using `curl_cffi` (impersonates
+  `chrome131`); combined-mode with ShrinkUrl posts `<short> | <title>`;
+  reddit/twitter special-cased (rewrites to `old.reddit.com`, uses
+  `api.fxtwitter.com`); data-driven brand prefixes per site; retries
+  through WARP when it hits a bot-challenge interstitial
+- **Wikibear** — `!wikibear [question]`: Wiki Bear recites a real Wikipedia
+  fact (or answers a question) and pivots into deadpan dark trivia; long
+  URLs shortened via is.gd through WARP
+- **YouTube** — yt-dlp-backed metadata snarfer for YouTube links
 
 ## Session cookies (reddit, YouTube)
 

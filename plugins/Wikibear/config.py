@@ -13,5 +13,5 @@ conf.registerChannelValue(Wikibear, 'enabled',
         '!wikibear is only available in channels where this is True.'))
 
 conf.registerGlobalValue(Wikibear, 'timeoutSec',
-    registry.PositiveInteger(60,
+    registry.PositiveInteger(120,
         'How long to wait for the claude CLI to produce a factoid.'))

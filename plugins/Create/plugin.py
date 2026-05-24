@@ -11,7 +11,11 @@ import os
 import re
 import uuid
 import json
+import base64
+import socket
+import ipaddress
 import subprocess
+import urllib.parse
 import urllib.request
 import urllib.error
 
@@ -20,7 +24,7 @@ import supybot.ircdb as ircdb
 import supybot.world as world
 import supybot.callbacks as callbacks
 import supybot.ircutils as ircutils
-from supybot.commands import wrap, optional
+from supybot.commands import wrap
 
 NSFW_PREFIX = ircutils.bold('[NSFW]')
 
@@ -60,6 +64,65 @@ EXPAND_SYSTEM = (
 )
 
 
+EDIT_MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
+_IMPERSONATE = "chrome131"
+_MAX_HOPS = 5
+_JPEG_SOF = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+             0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+
+# FLUX Kontext only accepts these exact width/height pairs (one per aspect
+# ratio); arbitrary sizes -> Runware 400 unsupportedFluxKontextDimensions.
+KONTEXT_DIMS = [
+    (1568, 672), (1392, 752), (1248, 832), (1184, 880), (1024, 1024),
+    (880, 1184), (832, 1248), (752, 1392), (672, 1568),
+]
+
+# Turn a user's casual edit request into ONE explicit imperative instruction for
+# FLUX Kontext. Kontext sees the image itself, so we never describe it; a vague
+# "give that man a halo" gets ignored, an explicit "Add a glowing halo above his
+# head, keep everything else unchanged" is applied cleanly.
+EDIT_REPHRASE_SYSTEM = (
+    "You rewrite a short image-edit request into ONE clear, explicit, imperative "
+    "editing instruction for an instruction-based image editor. You are ONLY "
+    "rewording text -- you will NOT be shown any image, and you must NEVER ask to "
+    "see one or say you can't see it. Assume the image and its subject exist. Do "
+    "NOT describe the existing image; only state the change. Start with an "
+    "imperative verb (Add, Remove, Replace, Change, Make, Turn, Put). Name "
+    "placement and appearance so it integrates naturally, and end with 'keep "
+    "everything else unchanged'. Output ONLY the instruction: one line, no "
+    "quotes, no preamble, no markdown. Max 220 characters."
+)
+
+
+def _ip_is_safe(ip):
+    if not ip.is_global:
+        return False
+    if isinstance(ip, ipaddress.IPv4Address):
+        if ip in ipaddress.ip_network("100.64.0.0/10"):  # CGNAT
+            return False
+    return True
+
+
+def _host_is_safe(host):
+    """True only if every address `host` resolves to is a public IP (SSRF guard)."""
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except (socket.gaierror, UnicodeError, OSError):
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except (ValueError, IndexError):
+            return False
+        if not _ip_is_safe(ip):
+            return False
+    return True
+
+
 class CreateError(Exception):
     pass
 
@@ -71,7 +134,8 @@ class Create(callbacks.Plugin):
 
     # ------------------------------------------------------------------ helpers
 
-    def _runware_image(self, prompt, model, timeout):
+    def _runware_image(self, prompt, model, timeout, width=1024, height=1024,
+                       reference_images=None, seed_image=None, strength=None):
         api_key = os.environ.get("RUNWARE_API_KEY")
         if not api_key:
             raise CreateError("RUNWARE_API_KEY not set")
@@ -80,13 +144,24 @@ class Create(callbacks.Plugin):
             "taskUUID": str(uuid.uuid4()),
             "positivePrompt": prompt,
             "model": model,
-            "width": 1024,
-            "height": 1024,
+            "width": width,
+            "height": height,
             "numberResults": 1,
-            "steps": 25,
-            "CFGScale": 7,
             "outputType": "URL",
         }
+        if reference_images:
+            # instruction edit (FLUX Kontext): edits these image(s). Kontext
+            # rejects steps/CFGScale (error unsupportedArchitectureCFGScale).
+            task["referenceImages"] = reference_images
+        else:
+            # SDXL text-to-image, or img2img when seed_image is given (the
+            # uncensored !picnsfw fallback); both need steps/CFGScale.
+            task["steps"] = 25
+            task["CFGScale"] = 7
+            if seed_image:
+                task["seedImage"] = seed_image
+                if strength is not None:
+                    task["strength"] = strength
         body = json.dumps([task]).encode("utf-8")
         req = urllib.request.Request(
             RUNWARE_ENDPOINT,
@@ -204,11 +279,14 @@ class Create(callbacks.Plugin):
         raise CreateError("atlas: timeout after %ds" % timeout)
 
     def _shorten(self, url):
+        # Route output URLs through ShrinkUrl's current chain (t.ly -> tinyurl
+        # -> x0.no). _getIsgdUrl was removed when is.gd was dropped 2026-05-24;
+        # _getTlyUrl is the live entry point. Best-effort: raw URL on any failure.
         try:
             for irc in world.ircs:
                 shrink = irc.getCallback("ShrinkUrl")
                 if shrink is not None:
-                    return shrink._getIsgdUrl(url)
+                    return shrink._getTlyUrl(url)
         except Exception:
             pass
         return url
@@ -221,7 +299,7 @@ class Create(callbacks.Plugin):
             return None
         return suffix
 
-    def _expand_via_claude(self, prompt):
+    def _expand_via_claude(self, prompt, system=EXPAND_SYSTEM):
         env = {
             "HOME": "/home/botuser",
             "PATH": "/home/botuser/.local/bin:/usr/bin:/bin",
@@ -236,7 +314,7 @@ class Create(callbacks.Plugin):
             "--model", CLAUDE_MODEL,
             "--no-session-persistence",
             "--disable-slash-commands",
-            "--system-prompt", EXPAND_SYSTEM,
+            "--system-prompt", system,
         ]
         try:
             result = subprocess.run(
@@ -257,7 +335,7 @@ class Create(callbacks.Plugin):
             return None
         return self._clean_suffix(result.stdout)
 
-    def _expand_via_atlas(self, prompt):
+    def _expand_via_atlas(self, prompt, system=EXPAND_SYSTEM):
         api_key = os.environ.get("ATLASCLOUD_API_KEY")
         if not api_key:
             self.log.warning("Create: ATLASCLOUD_API_KEY not set, no fallback")
@@ -265,7 +343,7 @@ class Create(callbacks.Plugin):
         body = {
             "model": ATLAS_LLM_MODEL,
             "messages": [
-                {"role": "system", "content": EXPAND_SYSTEM},
+                {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
             "max_tokens": 200,
@@ -320,6 +398,241 @@ class Create(callbacks.Plugin):
         self.log.info("Create: expanded via %s: %r -> %r", source, prompt, combined)
         return combined
 
+    def _rephrase_edit(self, instruction):
+        """Turn a casual edit request into an explicit imperative instruction for
+        Kontext. Returns the rephrased instruction, or the original on failure."""
+        out = self._expand_via_claude(instruction, system=EDIT_REPHRASE_SYSTEM)
+        if out is None:
+            out = self._expand_via_atlas(instruction, system=EDIT_REPHRASE_SYSTEM)
+        return out or instruction
+
+    # ------------------------------------------------------ image-edit helpers
+
+    def _download_image(self, url):
+        """Fetch an image URL -> (bytes, content_type). SSRF-guarded, size-capped,
+        image/* only, follows up to 5 redirects revalidating the host each hop.
+        Uses curl_cffi (Chrome impersonation) so CDNs like pbs.twimg.com and
+        Cloudflare-fronted hosts serve us, same as the imageview MCP."""
+        try:
+            from curl_cffi import requests as cc
+        except Exception as e:
+            raise CreateError("image fetch unavailable: %s" % e)
+        sess = cc.Session(impersonate=_IMPERSONATE)
+        visited = set()
+        cur = url
+        for _ in range(_MAX_HOPS + 1):
+            if cur in visited:
+                raise CreateError("redirect loop")
+            visited.add(cur)
+            parsed = urllib.parse.urlsplit(cur)
+            if parsed.scheme not in ("http", "https"):
+                raise CreateError("only http(s) URLs are accepted")
+            if not _host_is_safe(parsed.hostname or ""):
+                raise CreateError("host resolves to a non-public address")
+            try:
+                r = sess.get(
+                    cur, timeout=10, allow_redirects=False, stream=True,
+                    headers={
+                        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                        "Sec-Fetch-Dest": "image",
+                        "Sec-Fetch-Mode": "no-cors",
+                        "Sec-Fetch-Site": "cross-site",
+                    },
+                )
+            except Exception as e:
+                raise CreateError("fetch failed: %s" % e)
+            try:
+                if r.status_code in (301, 302, 303, 307, 308):
+                    loc = r.headers.get("Location") or r.headers.get("location")
+                    if not loc:
+                        raise CreateError("redirect without Location")
+                    cur = urllib.parse.urljoin(cur, loc)
+                    continue
+                if r.status_code != 200:
+                    raise CreateError("HTTP %s" % r.status_code)
+                ct = (r.headers.get("content-type")
+                      or r.headers.get("Content-Type") or "")
+                ct = ct.split(";", 1)[0].strip().lower()
+                if not ct.startswith("image/"):
+                    raise CreateError("not an image (%s)" % (ct or "unknown"))
+                buf = bytearray()
+                for chunk in r.iter_content(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    buf.extend(chunk)
+                    if len(buf) > EDIT_MAX_IMAGE_BYTES:
+                        raise CreateError(
+                            "image exceeds %d bytes" % EDIT_MAX_IMAGE_BYTES)
+                if not buf:
+                    raise CreateError("empty image")
+                return bytes(buf), ct
+            finally:
+                try:
+                    r.close()
+                except Exception:
+                    pass
+        raise CreateError("too many redirects")
+
+    @staticmethod
+    def _image_dims(data):
+        """Best-effort (width, height) for PNG/GIF/WEBP/JPEG, else None."""
+        try:
+            if data[:8] == b"\x89PNG\r\n\x1a\n":
+                w = int.from_bytes(data[16:20], "big")
+                h = int.from_bytes(data[20:24], "big")
+                return (w, h) if w and h else None
+            if data[:6] in (b"GIF87a", b"GIF89a"):
+                w = int.from_bytes(data[6:8], "little")
+                h = int.from_bytes(data[8:10], "little")
+                return (w, h) if w and h else None
+            if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+                fmt = data[12:16]
+                if fmt == b"VP8 ":
+                    w = int.from_bytes(data[26:28], "little") & 0x3FFF
+                    h = int.from_bytes(data[28:30], "little") & 0x3FFF
+                    return (w, h) if w and h else None
+                if fmt == b"VP8L" and data[20] == 0x2F:
+                    bits = int.from_bytes(data[21:25], "little")
+                    w = (bits & 0x3FFF) + 1
+                    h = ((bits >> 14) & 0x3FFF) + 1
+                    return (w, h) if w and h else None
+                if fmt == b"VP8X":
+                    w = int.from_bytes(data[24:27], "little") + 1
+                    h = int.from_bytes(data[27:30], "little") + 1
+                    return (w, h) if w and h else None
+            if data[:2] == b"\xff\xd8":
+                i, n = 2, len(data)
+                while i + 9 < n:
+                    if data[i] != 0xFF:
+                        i += 1
+                        continue
+                    marker = data[i + 1]
+                    if marker in (0xD8, 0xD9, 0x01) or 0xD0 <= marker <= 0xD7:
+                        i += 2
+                        continue
+                    seglen = int.from_bytes(data[i + 2:i + 4], "big")
+                    if seglen < 2:
+                        break
+                    if marker in _JPEG_SOF:
+                        h = int.from_bytes(data[i + 5:i + 7], "big")
+                        w = int.from_bytes(data[i + 7:i + 9], "big")
+                        return (w, h) if w and h else None
+                    i += 2 + seglen
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _kontext_dims(w, h):
+        """Pick the supported FLUX Kontext size whose aspect ratio is closest to
+        the source image (Kontext rejects anything off its fixed list)."""
+        if w <= 0 or h <= 0:
+            return 1024, 1024
+        ar = w / h
+
+        def closeness(d):
+            r = ar / (d[0] / d[1])
+            return max(r, 1.0 / r)  # symmetric ratio distance, >= 1
+
+        return min(KONTEXT_DIMS, key=closeness)
+
+    @staticmethod
+    def _target_dims(w, h):
+        """SDXL-friendly size (~1MP, /64-aligned) preserving aspect ratio, for
+        the uncensored img2img fallback."""
+        if w <= 0 or h <= 0:
+            return 1024, 1024
+        long_side = 1024
+        if w >= h:
+            nw, nh = long_side, long_side * h / w
+        else:
+            nw, nh = long_side * w / h, long_side
+
+        def snap(v):
+            return max(512, min(1536, int(round(v / 64.0)) * 64))
+
+        return snap(nw), snap(nh)
+
+    @staticmethod
+    def _is_moderation_error(err):
+        """True if a Runware error looks like provider NSFW moderation."""
+        s = str(err).lower()
+        return any(m in s for m in (
+            "invalidprovidercontent", "invalidbflcontent",
+            "moderation", "flagged", "invalid content"))
+
+    def _make_image(self, irc, msg, prompt, model, nsfw):
+        """Shared !pic / !picnsfw path: edit a linked image, else text-to-image."""
+        timeout = self.registryValue("timeoutSec")
+        prefix = (NSFW_PREFIX + " ") if nsfw else ""
+        seed_url, instruction = self._extract_seed(prompt, default="")
+        if seed_url:
+            self._edit_image(irc, msg, seed_url, instruction, timeout, prefix, nsfw)
+            return
+        original = prompt
+        prompt = self._expand_prompt(prompt)
+        if prompt != original:
+            irc.reply("prompt: " + prompt, prefixNick=False)
+        try:
+            url = self._runware_image(prompt, model, timeout)
+        except CreateError as e:
+            self.log.warning("Create image: %s", e)
+            irc.error(str(e))
+            return
+        irc.reply(prefix + self._shorten(url), prefixNick=False)
+
+    def _edit_image(self, irc, msg, url, instruction, timeout, prefix, nsfw):
+        """Edit a linked image. Primary path is FLUX Kontext (top quality), but
+        Runware enforces BFL moderation on ALL Kontext variants, so NSFW edits
+        are refused. For !picnsfw, on a moderation refusal we fall back to
+        uncensored Lustify SDXL img2img (lower quality, but actually does NSFW)."""
+        instruction = (instruction or "").strip()
+        if not instruction:
+            irc.error("tell me what to change, e.g. !pic <url> add a halo above his head")
+            return
+        try:
+            data, ct = self._download_image(url)
+        except CreateError as e:
+            self.log.warning("Create edit fetch: %s", e)
+            irc.error("couldn't fetch that image: " + str(e))
+            return
+        if ct == "image/jpg":
+            ct = "image/jpeg"
+        edit_instruction = self._rephrase_edit(instruction)
+        irc.reply("editing: " + edit_instruction, prefixNick=False)
+        dims = self._image_dims(data)
+        ref_uri = "data:%s;base64,%s" % (ct, base64.b64encode(data).decode("ascii"))
+        # 1) FLUX Kontext — best quality (SFW only)
+        kw, kh = self._kontext_dims(*dims) if dims else (1024, 1024)
+        kmodel = self.registryValue("editModel", msg.channel, irc.network)
+        try:
+            out = self._runware_image(edit_instruction, kmodel, timeout,
+                                      width=kw, height=kh, reference_images=[ref_uri])
+            irc.reply(prefix + self._shorten(out), prefixNick=False)
+            return
+        except CreateError as e:
+            if not (nsfw and self._is_moderation_error(e)):
+                self.log.warning("Create edit kontext: %s", e)
+                irc.error(str(e))
+                return
+            self.log.info("Create edit: Kontext refused NSFW, falling back to Lustify img2img")
+        # 2) Uncensored fallback: Lustify SDXL img2img
+        nmodel = self.registryValue("model", msg.channel, irc.network)
+        sw, sh = self._target_dims(*dims) if dims else (1024, 1024)
+        try:
+            strength = float(self.registryValue("editStrength", msg.channel, irc.network))
+        except Exception:
+            strength = 0.6
+        try:
+            out = self._runware_image(edit_instruction, nmodel, timeout,
+                                      width=sw, height=sh,
+                                      seed_image=ref_uri, strength=strength)
+        except CreateError as e:
+            self.log.warning("Create edit nsfw img2img: %s", e)
+            irc.error(str(e))
+            return
+        irc.reply(prefix + "(uncensored) " + self._shorten(out), prefixNick=False)
+
     def _check_cap(self, irc, msg, cap_name):
         if not msg.channel:
             irc.error("channel-only")
@@ -343,68 +656,48 @@ class Create(callbacks.Plugin):
     # ------------------------------------------------------------------ !pic
 
     def pic(self, irc, msg, args, prompt):
-        """<prompt> — generate an image via Runware (SFW model)."""
+        """<prompt> | <image-url> [edit] — text-to-image, or look at a linked
+        image and edit it (image-to-image) via Runware (SFW model)."""
         if not self._check_cap(irc, msg, "generative"):
             return
         prompt = self._parse_prompt(irc, prompt, "pic")
         if prompt is None:
             return
         model = self.registryValue("picModel", msg.channel, irc.network)
-        timeout = self.registryValue("timeoutSec")
-        original = prompt
-        prompt = self._expand_prompt(prompt)
-        if prompt != original:
-            irc.reply("prompt: " + prompt, prefixNick=False)
-        try:
-            url = self._runware_image(prompt, model, timeout)
-        except CreateError as e:
-            self.log.warning("Create.pic: %s", e)
-            irc.error(str(e))
-            return
-        irc.reply(self._shorten(url), prefixNick=False)
+        self._make_image(irc, msg, prompt, model, nsfw=False)
 
     pic = wrap(pic, ["public", "text"])
 
     # -------------------------------------------------------------- !picnsfw
 
     def picnsfw(self, irc, msg, args, prompt):
-        """<prompt> — generate an image via Runware.ai (unrestricted)."""
+        """<prompt> | <image-url> [edit] — text-to-image, or look at a linked
+        image and edit it (image-to-image) via Runware (unrestricted model)."""
         if not self._check_cap(irc, msg, "generative"):
             return
         prompt = self._parse_prompt(irc, prompt, "picnsfw")
         if prompt is None:
             return
         model = self.registryValue("model", msg.channel, irc.network)
-        timeout = self.registryValue("timeoutSec")
-        original = prompt
-        prompt = self._expand_prompt(prompt)
-        if prompt != original:
-            irc.reply("prompt: " + prompt, prefixNick=False)
-        try:
-            url = self._runware_image(prompt, model, timeout)
-        except CreateError as e:
-            self.log.warning("Create.picnsfw: %s", e)
-            irc.error(str(e))
-            return
-        irc.reply(NSFW_PREFIX + " " + self._shorten(url), prefixNick=False)
+        self._make_image(irc, msg, prompt, model, nsfw=True)
 
     picnsfw = wrap(picnsfw, ["public", "text"])
 
     # ------------------------------------------------------------------ !video
 
-    def _extract_seed(self, prompt):
-        """Return (seed_url, motion_text) if prompt contains a URL, else (None, prompt).
+    def _extract_seed(self, prompt, default=DEFAULT_MOTION_PROMPT):
+        """Return (seed_url, rest_text) if prompt contains a URL, else (None, prompt).
 
-        The URL is removed from the motion text; an empty motion text is
-        replaced with a generic default."""
+        The URL is removed from the rest text; an empty rest is replaced with
+        `default` (a generic motion phrase for video; pass "" for !pic edits)."""
         m = SEED_URL_RE.search(prompt or "")
         if not m:
             return None, prompt
         url = m.group(0).rstrip(".,;:!?)>]'\"")
-        motion = (prompt[:m.start()] + prompt[m.end():]).strip(" ,.;:-")
-        if not motion:
-            motion = DEFAULT_MOTION_PROMPT
-        return url, motion
+        rest = (prompt[:m.start()] + prompt[m.end():]).strip(" ,.;:-")
+        if not rest:
+            rest = default
+        return url, rest
 
     def _resolve_url(self, url):
         """Follow redirects (e.g. is.gd shortlinks) and return the final URL.
@@ -525,73 +818,6 @@ class Create(callbacks.Plugin):
         irc.reply(NSFW_PREFIX + " " + self._shorten(video_url), prefixNick=False)
 
     videonsfw = wrap(videonsfw, ["public", "text"])
-
-    # ------------------------------------------------------------------ !cap / !uncap
-
-    def _resolve_user(self, irc, nick):
-        try:
-            hostmask = irc.state.nickToHostmask(nick)
-        except KeyError:
-            return None, "nick not in channel"
-        try:
-            return ircdb.users.getUser(hostmask), None
-        except KeyError:
-            return None, "user not registered with the bot"
-
-    def cap(self, irc, msg, args, nick, capname):
-        """<nick> [capname] — grant capability (default: generative) in this channel."""
-        if not msg.channel:
-            irc.error("channel-only")
-            return
-        user, err = self._resolve_user(irc, nick)
-        if err:
-            irc.error(err)
-            return
-        cap = ircdb.makeChannelCapability(msg.channel, capname or "generative")
-        user.addCapability(cap)
-        ircdb.users.setUser(user)
-        irc.reply("granted %s to %s" % (cap, nick), prefixNick=False)
-
-    cap = wrap(cap, [("checkCapability", "admin"), "public", "somethingWithoutSpaces", optional("somethingWithoutSpaces")])
-
-    def uncap(self, irc, msg, args, nick, capname):
-        """<nick> [capname] — revoke capability (default: generative) in this channel."""
-        if not msg.channel:
-            irc.error("channel-only")
-            return
-        user, err = self._resolve_user(irc, nick)
-        if err:
-            irc.error(err)
-            return
-        cap = ircdb.makeChannelCapability(msg.channel, capname or "generative")
-        user.removeCapability(cap)
-        ircdb.users.setUser(user)
-        irc.reply("revoked %s from %s" % (cap, nick), prefixNick=False)
-
-    uncap = wrap(uncap, [("checkCapability", "admin"), "public", "somethingWithoutSpaces", optional("somethingWithoutSpaces")])
-
-    # ------------------------------------------------------------ !chancap / !unchancap
-
-    def chancap(self, irc, msg, args, channel, capname):
-        """[<channel>] <capname> — enable feature <capname> in <channel> (defaults to current)."""
-        chan = ircdb.channels.getChannel(channel)
-        chan.addCapability(capname)
-        ircdb.channels.setChannel(channel, chan)
-        irc.reply("enabled '%s' in %s" % (capname, channel), prefixNick=False)
-
-    chancap = wrap(chancap, [("checkCapability", "admin"), ("channel"), "somethingWithoutSpaces"])
-
-    def unchancap(self, irc, msg, args, channel, capname):
-        """[<channel>] <capname> — disable feature <capname> in <channel> (defaults to current)."""
-        chan = ircdb.channels.getChannel(channel)
-        try:
-            chan.removeCapability(capname)
-        except KeyError:
-            pass
-        ircdb.channels.setChannel(channel, chan)
-        irc.reply("disabled '%s' in %s" % (capname, channel), prefixNick=False)
-
-    unchancap = wrap(unchancap, [("checkCapability", "admin"), ("channel"), "somethingWithoutSpaces"])
 
 
 Class = Create

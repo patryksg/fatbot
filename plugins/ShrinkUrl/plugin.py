@@ -40,18 +40,6 @@ try:
 except ImportError:
     _unalix_available = False
 
-try:
-    import requests as _requests
-    _requests_available = True
-except ImportError:
-    _requests_available = False
-
-# is.gd blocks our VPS egress IP behind a Cloudflare challenge; we tunnel
-# only is.gd traffic through cloudflare-warp (running in proxy mode locally).
-# This proxy URL is the ONLY thing in fatbot wired up to WARP — all other
-# plugins and shorteners continue to use direct egress.
-_WARP_SOCKS_PROXY = 'socks5h://127.0.0.1:40000'
-
 import supybot.log as log
 import supybot.conf as conf
 import supybot.utils as utils
@@ -124,42 +112,9 @@ class ShrinkUrl(callbacks.PluginRegexp):
         self.__parent = super(ShrinkUrl, self)
         self.__parent.__init__(irc)
         self.db = ShrunkenUrlDB()
-        # Per-service timestamp of the last NOTICE sent to psg, used to
-        # rate-limit fallback notifications so a sustained outage does not
-        # generate one message per snarf.
-        self._lastNotify = {}
 
     def die(self):
         self.db.close()
-
-    _notifyTarget = 'psg'
-    _notifyMinIntervalSec = 1800  # 30 minutes per service
-
-    def _notifyPsg(self, service, message):
-        """Send a rate-limited NOTICE to psg about a fallback/error in this
-        plugin. `service` keys the rate-limit bucket (e.g. 'isgd', 'tly').
-        """
-        try:
-            now = time.time()
-            last = self._lastNotify.get(service, 0)
-            if now - last < self._notifyMinIntervalSec:
-                return
-            self._lastNotify[service] = now
-            text = '[ShrinkUrl] %s: %s' % (service, message)
-            sent = False
-            for ircObj in list(world.ircs):
-                try:
-                    ircObj.queueMsg(ircmsgs.notice(self._notifyTarget, text))
-                    sent = True
-                except Exception:
-                    log.exception(
-                        'ShrinkUrl: notify failed on network %r',
-                        getattr(ircObj, 'network', '?'))
-            if not sent:
-                log.warning('ShrinkUrl: no IRC connection to notify %s: %s',
-                            self._notifyTarget, text)
-        except Exception:
-            log.exception('ShrinkUrl: _notifyPsg outer failure')
 
     def _cleanUrl(self, url):
         if not _unalix_available:
@@ -339,7 +294,7 @@ class ShrinkUrl(callbacks.PluginRegexp):
 
     _tlyApi = 'https://t.ly/api/v1/link/shorten'
     @retry
-    def _getTlyUrl(self, url):
+    def _tlyOnly(self, url):
         url = self._cleanUrl(url)[0]
         try:
             return self.db.get('tly', url)
@@ -368,6 +323,20 @@ class ShrinkUrl(callbacks.PluginRegexp):
             self.db.set('tly', url, link)
             return link
 
+    def _getTlyUrl(self, url):
+        """Primary shortener chain: t.ly -> tinyurl -> x0.no. Each provider has
+        its own @retry; we fall through silently so a short URL is still
+        produced as long as one provider is up."""
+        try:
+            return self._tlyOnly(url)
+        except Exception:
+            log.info('ShrinkUrl: t.ly failed, falling back to tinyurl')
+        try:
+            return self._getTinyUrl(url)
+        except Exception:
+            log.info('ShrinkUrl: tinyurl failed, falling back to x0.no')
+        return self._getX0Url(url)
+
     @internationalizeDocstring
     def tly(self, irc, msg, args, url):
         """<url>
@@ -382,88 +351,6 @@ class ShrinkUrl(callbacks.PluginRegexp):
         except ShrinkError as e:
             irc.error(str(e))
     tly = thread(wrap(tly, ['httpUrl']))
-
-    _isgdApi = 'https://is.gd/create.php'
-    def _getIsgdUrl(self, url):
-        url = self._cleanUrl(url)[0]
-        try:
-            return self.db.get('isgd', url)
-        except KeyError:
-            pass
-        # Try is.gd via WARP SOCKS5 proxy. On failure, fall back through
-        # t.ly, then tinyurl, so the bot keeps producing a short URL even
-        # if two of the three providers are down. psg gets notified
-        # (rate-limited) whenever a fallback kicks in.
-        link = None
-        isgd_err = None
-        if _requests_available:
-            try:
-                r = _requests.get(
-                    self._isgdApi,
-                    params={'format': 'simple', 'url': url},
-                    proxies={'http': _WARP_SOCKS_PROXY,
-                             'https': _WARP_SOCKS_PROXY},
-                    timeout=10,
-                    headers={'User-Agent':
-                             'fatbot-shrinkurl/1.0 (+https://is.gd/)'})
-                if r.status_code == 200:
-                    text = r.text.strip()
-                    if text.startswith('http://') or text.startswith('https://'):
-                        link = text
-                    else:
-                        isgd_err = 'non-URL response: %s' % text[:160]
-                        log.warning('is.gd %s', isgd_err)
-                else:
-                    isgd_err = 'HTTP %s: %s' % (r.status_code, r.text[:160])
-                    log.warning('is.gd %s', isgd_err)
-            except Exception as e:
-                isgd_err = '%s: %s' % (type(e).__name__, e)
-                log.exception('is.gd via WARP proxy failed; falling back')
-        else:
-            isgd_err = 'requests module unavailable'
-            log.warning('requests module unavailable; is.gd fallback path')
-
-        if link is None:
-            self._notifyPsg(
-                'isgd',
-                'is.gd failed (%s); falling back to t.ly' % isgd_err)
-            try:
-                link = self._getTlyUrl(url)
-            except Exception as e:
-                tly_err = '%s: %s' % (type(e).__name__, e)
-                log.exception('t.ly fallback failed; trying tinyurl')
-                self._notifyPsg(
-                    'tly',
-                    't.ly fallback failed (%s); falling back to tinyurl'
-                    % tly_err)
-                try:
-                    link = self._getTinyUrl(url)
-                except Exception as e:
-                    tiny_err = '%s: %s' % (type(e).__name__, e)
-                    self._notifyPsg(
-                        'tinyurl',
-                        'tinyurl fallback ALSO failed (%s); no short URL '
-                        'produced' % tiny_err)
-                    raise
-        self.db.set('isgd', url, link)
-        return link
-
-    @internationalizeDocstring
-    def isgd(self, irc, msg, args, url):
-        """<url>
-
-        Returns an is.gd version of <url>. Falls back to t.ly, then
-        tinyurl.com, if upstream providers are unreachable. psg is
-        notified (rate-limited) when a fallback is used.
-        """
-        try:
-            isgdurl = self._getIsgdUrl(url)
-            m = irc.reply(isgdurl)
-            if m is not None:
-                m.tag('shrunken')
-        except ShrinkError as e:
-            irc.error(str(e))
-    isgd = thread(wrap(isgd, ['httpUrl']))
 
 Class = ShrinkUrl
 

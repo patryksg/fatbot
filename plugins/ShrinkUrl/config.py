@@ -43,11 +43,11 @@ def configure(advanced):
         conf.supybot.plugins.ShrinkUrl.shrinkSnarfer.setValue(True)
 
 class ShrinkService(registry.OnlySomeStrings):
-    """Valid values include 'tiny', 'ur1', 'x0', 'tly', and 'isgd'."""
-    validStrings = ('tiny', 'ur1', 'x0', 'tly', 'isgd')
+    """Valid values include 'tiny', 'ur1', 'x0', and 'tly'."""
+    validStrings = ('tiny', 'ur1', 'x0', 'tly')
 
 class ShrinkCycle(registry.SpaceSeparatedListOfStrings):
-    """Valid values include 'ln', 'tiny', 'ur1', 'x0', 'tly', and 'isgd'."""
+    """Valid values include 'ln', 'tiny', 'ur1', 'x0', and 'tly'."""
     Value = ShrinkService
 
     def __init__(self, *args, **kwargs):
@@ -89,7 +89,7 @@ conf.registerChannelValue(ShrinkUrl, 'outFilter',
     URLs of outgoing messages if those URLs are longer than
     supybot.plugins.ShrinkUrl.minimumLength.""")))
 conf.registerChannelValue(ShrinkUrl, 'default',
-    ShrinkService('x0', _("""Determines what website the bot will use when
+    ShrinkService('tly', _("""Determines what website the bot will use when
     shrinking a URL.""")))
 conf.registerGlobalValue(ShrinkUrl, 'bold',
     registry.Boolean(True, _("""Determines whether this plugin will bold

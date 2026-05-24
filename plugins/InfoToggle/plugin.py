@@ -56,7 +56,7 @@ def _find_user(irc, name):
 
 
 class InfoToggle(callbacks.Plugin):
-    """Admin shortcuts: !info, !ai, !chanmode, !adduser, !deluser, !cap, !remcap."""
+    """Admin shortcuts: !info, !ai, !chanmode, !chancap, !unchancap, !adduser, !deluser, !cap, !remcap."""
 
     def _check_owner(self, irc, msg):
         if not ircdb.checkCapability(msg.prefix, "owner"):
@@ -239,6 +239,49 @@ class InfoToggle(callbacks.Plugin):
         irc.reply("Removed capability '" + capability + "' from user '" + u.name + "'.")
 
     remcap = wrap(remcap, ["something", "something"])
+
+    # -------------------------------------------------------------- !chancap
+    def chancap(self, irc, msg, args, channel, capability):
+        """[<#channel>] <capability>
+
+        Enable feature <capability> on <channel> by adding it to the channel's
+        capabilities (e.g. 'generative'). Defaults to the current channel.
+        """
+        if not self._check_owner(irc, msg):
+            return
+        channel = _resolve_channel(msg, channel)
+        if not channel:
+            irc.error("Could not determine channel.")
+            return
+        chan = ircdb.channels.getChannel(channel)
+        chan.addCapability(capability)
+        ircdb.channels.setChannel(channel, chan)
+        irc.reply("Enabled '" + capability + "' on " + channel + ".")
+
+    chancap = wrap(chancap, [optional("channel"), "somethingWithoutSpaces"])
+
+    # ------------------------------------------------------------ !unchancap
+    def unchancap(self, irc, msg, args, channel, capability):
+        """[<#channel>] <capability>
+
+        Disable feature <capability> on <channel> by removing it from the
+        channel's capabilities. Defaults to the current channel.
+        """
+        if not self._check_owner(irc, msg):
+            return
+        channel = _resolve_channel(msg, channel)
+        if not channel:
+            irc.error("Could not determine channel.")
+            return
+        chan = ircdb.channels.getChannel(channel)
+        try:
+            chan.removeCapability(capability)
+        except KeyError:
+            pass
+        ircdb.channels.setChannel(channel, chan)
+        irc.reply("Disabled '" + capability + "' on " + channel + ".")
+
+    unchancap = wrap(unchancap, [optional("channel"), "somethingWithoutSpaces"])
 
 
 Class = InfoToggle
