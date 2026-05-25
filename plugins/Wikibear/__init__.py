@@ -4,7 +4,7 @@ import supybot
 from supybot import world
 
 __version__ = "0.1"
-__author__ = supybot.Author("psg", "psg", "psg@skund.net")
+__author__ = supybot.Author("psg", "psg", "psg@irc.example.org")
 __contributors__ = {}
 __url__ = ""
 

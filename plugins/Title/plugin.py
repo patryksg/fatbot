@@ -70,8 +70,8 @@ _cookies_loaded = None  # (path, mtime) of the file loaded into _session
 
 # Localhost Cloudflare WARP SOCKS5 proxy. Used as a retry route when a
 # direct fetch returns a bot-challenge page (PerimeterX / Cloudflare /
-# Akamai) — the WARP egress often gets the real content. Configure a local
-# WARP proxy on this port (warp-svc --proxy) to enable the retry path.
+# Akamai) — the WARP egress often gets the real content. See
+# project_skund_cloudflare_warp.
 _WARP_PROXY = 'socks5h://127.0.0.1:40000'
 _WARP_PROXIES = {'http': _WARP_PROXY, 'https': _WARP_PROXY}
 
@@ -92,6 +92,35 @@ _BOT_CHALLENGE_TITLE_RE = re.compile(
 
 def _is_challenge_title(title):
     return bool(title) and bool(_BOT_CHALLENGE_TITLE_RE.match(title))
+
+
+_META_TAG_RE = re.compile(r'<meta\b[^>]*>', re.IGNORECASE)
+_REFRESH_URL_RE = re.compile(
+    r'url\s*=\s*(?:\'([^\']+)\'|"([^"]+)"|([^\s"\'>]+))', re.IGNORECASE)
+
+
+def _meta_refresh_target(body, parsed):
+    """If body is a <meta http-equiv=refresh> interstitial, return the
+    absolute refresh URL (resolved against parsed), else None. Anti-bot
+    gates (e.g. Akamai bot-manager's "bm-verify" page on justice.gov) 200
+    with such a page and an empty <title>; following the refresh on the
+    same (now cookie-warmed) session reaches the real content."""
+    try:
+        head = body[:8192].decode('latin-1', 'ignore')
+    except Exception:
+        return None
+    for m in _META_TAG_RE.finditer(head):
+        tag = m.group(0)
+        if 'refresh' not in tag.lower():
+            continue
+        um = _REFRESH_URL_RE.search(tag)
+        if not um:
+            continue
+        target = (um.group(1) or um.group(2) or um.group(3) or '').strip()
+        if not target:
+            continue
+        return urllib.parse.urljoin(urllib.parse.urlunsplit(parsed), target)
+    return None
 
 
 def _maybe_load_cookies(path):
@@ -637,6 +666,31 @@ def _attempt_fetch_title(url, *, timeout, max_bytes, cookies_file, force_warp):
         return None
     body = getattr(r, '_cached_body', b'') or b''
     title = _decode_title(body, ct)
+
+    # Anti-bot meta-refresh interstitial (e.g. Akamai bot-manager's
+    # "bm-verify" gate used by justice.gov): the first 200 carries no real
+    # <title> and a <meta refresh> to a verification URL. Follow it -- the
+    # bot-manager cookies this session just received carry over -- to reach
+    # the real page. Bounded to avoid interstitial loops.
+    hops = 0
+    while (not title or _is_challenge_title(title)) and hops < 2:
+        target = _meta_refresh_target(body, parsed)
+        if not target:
+            break
+        hops += 1
+        walk = _walk_redirects(target, timeout=timeout, max_bytes=max_bytes,
+                               referer=url, cookies_file=cookies_file,
+                               force_warp=force_warp)
+        if walk is None or walk[0].status_code != 200:
+            break
+        r, parsed = walk
+        ct = (r.headers.get('content-type')
+              or r.headers.get('Content-Type') or '')
+        if 'html' not in ct.lower() and 'xml' not in ct.lower():
+            break
+        body = getattr(r, '_cached_body', b'') or b''
+        title = _decode_title(body, ct)
+
     return _strip_reddit_suffix(title, url)
 
 
@@ -872,6 +926,18 @@ class Title(callbacks.Plugin):
         body = _truncate_text_word_aware(text, budget)
         return f'{prefix}"{body}"{suffix}'
 
+    def _compose_line(self, prefix, title, short, max_len):
+        """Assemble '<prefix><title> | <short-url>' within max_len bytes.
+        The shortened URL is appended last and never truncated; the title
+        is word-truncated to whatever byte budget remains."""
+        suffix = ''
+        if short:
+            suffix = f' | {ircutils.mircColor(short, "12")}'
+        overhead = len((prefix + suffix).encode('utf-8'))
+        budget = max(1, max_len - overhead)
+        body = _truncate_text_word_aware(title, budget)
+        return f'{prefix}{body}{suffix}'
+
     def _do_fetch(self, irc, channel, url):
         network = irc.network
         max_len = self.registryValue('maxLength')
@@ -908,34 +974,22 @@ class Title(callbacks.Plugin):
             line = self._format_tweet_line(tweet, short, max_len)
         elif brand is not None and title:
             title = _strip_brand_suffix(brand, title)
-            if short:
-                colored_short = ircutils.mircColor(short, '12')
-                line = f"{brand.logo}{title} | {colored_short}"
-            else:
-                line = f"{brand.logo}{title}"
-            line = _truncate_bytes(line, max_len)
-        else:
-            title_first = bool(sub)
-            if short and title:
-                colored_short = ircutils.mircColor(short, '12')
-                if title_first:
-                    line = f"{title} | {colored_short}"
-                else:
-                    line = f"{colored_short} | {title}"
-            elif title:
-                # Plain bare title — no '::' prefix; the logo-prefixed
-                # paths above already cover the cases where a marker is
-                # useful. The legacy Title.format setting is ignored.
-                line = title
-            elif short:
-                line = short
-            else:
-                return
-
+            line = self._compose_line(brand.logo, title, short, max_len)
+        elif title:
+            # Bare title (incl. reddit /r/sub prefix). Short URL is appended
+            # last by _compose_line so it always trails the headline and is
+            # never truncated away.
+            prefix = ''
+            if sub:
+                prefix = f"{_REDDIT_LOGO}{ircutils.bold(f'/r/{sub}')} · "
+            line = self._compose_line(prefix, title, short, max_len)
+        elif short:
+            line = short
             if sub:
                 line = f"{_REDDIT_LOGO}{ircutils.bold(f'/r/{sub}')} · {line}"
-
             line = _truncate_bytes(line, max_len)
+        else:
+            return
 
         line = line.replace('\r', ' ').replace('\n', ' ').replace('\x00', '')
         irc.queueMsg(ircmsgs.privmsg(channel, line))
