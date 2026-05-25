@@ -41,7 +41,7 @@ RATELIMIT_RE = re.compile(
     r"approaching.+limit|too many requests|usage cap"
 )
 
-BRAIN_PATH = "/home/botuser/runbot/fatkidsinfo.md"
+BRAIN_PATH = "/home/botuser/runbot/chaninfo.md"
 BRAIN_CAP = "brain"
 BRAIN_MAX_BYTES = 16_000
 
