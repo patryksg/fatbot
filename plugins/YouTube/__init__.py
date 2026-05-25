@@ -11,7 +11,7 @@ import supybot
 from supybot import world
 
 __version__ = "2026.05.08"
-__author__ = supybot.Author('juarez', 'juarez', 'juarez@local')
+__author__ = supybot.Author('fatbot', 'fatbot', 'fatbot@example.com')
 __contributors__ = {}
 __url__ = ''
 
