@@ -20,8 +20,8 @@ CONFIG_DIR = "/home/botuser/runbot/.claude"
 MCP_CONFIG = "/home/botuser/runbot/plugins/Claude/mcp-imageview.json"
 MODEL = "claude-haiku-4-5-20251001"
 OPUS_MODEL = "claude-opus-4-7"
-MAX_LINES_SMART = 5
-MAX_LINES_NORMAL = 4
+MAX_LINES_SMART = 6
+MAX_LINES_NORMAL = 6
 SMART_THINKING_TOKENS = 4000
 TIMEOUT_SEC = 150
 MAX_CHARS = 380
@@ -41,7 +41,7 @@ RATELIMIT_RE = re.compile(
     r"approaching.+limit|too many requests|usage cap"
 )
 
-BRAIN_PATH = "/home/botuser/runbot/chaninfo.md"
+BRAIN_DIR = "/home/botuser/runbot"
 BRAIN_CAP = "brain"
 BRAIN_MAX_BYTES = 16_000
 
@@ -58,11 +58,11 @@ SYSTEM_PROMPT_BREVITY_NORMAL = (
     "if the honest answer is genuinely short (yes/no, a one-word reply, a quip), keep it short. "
 )
 SYSTEM_PROMPT_BREVITY_SMART = (
-    "Reply in up to 3 lines, separated by newlines, no blank lines. "
+    "Reply in up to 6 lines, separated by newlines, no blank lines. "
     "Each line must be 300 characters or fewer, plain text only. "
     "Try to pack each line you use close to the 300-character limit with real content — "
     "specifics, names, dates, context, a related fact, a useful tangent — instead of a few short sentences. "
-    "Use all 3 lines when the topic has more to say; use fewer only when there genuinely isn't more worth saying. "
+    "Use all 6 lines when the topic has more to say; use fewer only when there genuinely isn't more worth saying. "
     "Do not pad with filler, hedging, or restated questions. "
 )
 SYSTEM_PROMPT_TAIL = (
@@ -158,6 +158,36 @@ def smart_truncate(text: str, limit: int) -> str:
     return cut + "…"
 
 
+def wrap_line(line: str, max_chars: int) -> list:
+    """Greedily word-wrap one line into chunks of at most max_chars chars.
+    A single token longer than max_chars is hard-split."""
+    line = line.strip()
+    if not line:
+        return []
+    if len(line) <= max_chars:
+        return [line]
+    chunks, cur = [], ""
+    for word in line.split(" "):
+        while len(word) > max_chars:
+            if cur:
+                chunks.append(cur)
+                cur = ""
+            chunks.append(word[:max_chars])
+            word = word[max_chars:]
+        if not word:
+            continue
+        if not cur:
+            cur = word
+        elif len(cur) + 1 + len(word) <= max_chars:
+            cur += " " + word
+        else:
+            chunks.append(cur)
+            cur = word
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
 def sanitize_lines(text: str, max_lines: int, max_chars: int = MAX_CHARS) -> list:
     kept = []
     for line in text.splitlines():
@@ -170,7 +200,27 @@ def sanitize_lines(text: str, max_lines: int, max_chars: int = MAX_CHARS) -> lis
         return []
     if max_lines == 1:
         return [smart_truncate(" ".join(kept), max_chars)]
-    return [smart_truncate(l, max_chars) for l in kept[:max_lines]]
+    # Word-wrap the model's lines across the available budget instead of
+    # truncating a single long line; only the final line is ellipsized, and
+    # only when the content genuinely overflows all max_lines.
+    pieces = []
+    for line in kept:
+        pieces.extend(wrap_line(line, max_chars))
+    if len(pieces) <= max_lines:
+        return pieces
+    head = pieces[:max_lines - 1]
+    head.append(smart_truncate(" ".join(pieces[max_lines - 1:]), max_chars))
+    return head
+
+
+def _brain_path(channel: str) -> str:
+    """Strict per-channel brain file: '#yourchannel' -> '<BRAIN_DIR>/fatkidsinfo.md'.
+    Returns '' for an unusable channel name and never falls back to another
+    channel's file. Slug rule MUST match bin/fatkids-digest.py:slug_for()."""
+    slug = re.sub(r"[^a-z0-9_-]+", "", (channel or "").lower())
+    if not slug:
+        return ""
+    return os.path.join(BRAIN_DIR, slug + "info.md")
 
 
 class _ContextStore:
@@ -287,7 +337,7 @@ class Claude(callbacks.Plugin):
     def smart(self, irc, msg, args):
         """takes no arguments
 
-        Switch this channel to Claude Opus mode (up to 3 lines, max effort).
+        Switch this channel to Claude Opus mode (up to 6 lines, max effort).
         Ask questions by addressing the bot by nick.
         """
         self._switch_mode(irc, msg, 'opus', 'claude opus (smart)')
@@ -359,15 +409,18 @@ class Claude(callbacks.Plugin):
     def _ctx_key(self, msg):
         return ((msg.args[0] or "").lower(), (msg.nick or "").lower())
 
-    def _load_brain(self) -> str:
+    def _load_brain(self, channel: str) -> str:
+        path = _brain_path(channel)
+        if not path:
+            return ""
         try:
-            st = os.stat(BRAIN_PATH)
+            st = os.stat(path)
         except OSError:
             return ""
         if st.st_size == 0:
             return ""
         try:
-            with open(BRAIN_PATH, "rb") as f:
+            with open(path, "rb") as f:
                 data = f.read(BRAIN_MAX_BYTES)
         except OSError:
             return ""
@@ -413,7 +466,7 @@ class Claude(callbacks.Plugin):
                 except KeyError:
                     brain_on = False
             if brain_on:
-                brain = self._load_brain()
+                brain = self._load_brain(channel)
                 if brain:
                     speaker = msg.nick or "user"
                     return (
@@ -647,9 +700,19 @@ class Claude(callbacks.Plugin):
             user_parts.append({"text": "\n\n".join(fetch_blocks) + "\n\n"})
         user_parts.append({"text": question})
         contents.append({"role": "user", "parts": user_parts})
-        gen_config = {"temperature": 0.7, "maxOutputTokens": 600}
+        gen_config = {
+            "temperature": 0.7,
+            "maxOutputTokens": 900,
+            # gemini-2.5-flash is a thinking model and counts hidden
+            # reasoning tokens against maxOutputTokens. Left unbounded it
+            # spends the whole budget thinking (~860 tokens on a trivial
+            # question) and the visible reply is cut off mid-sentence with
+            # finishReason MAX_TOKENS. Disable thinking for these short IRC
+            # replies. See feedback-gemini-2-5-flash-thinking-budget.
+            "thinkingConfig": {"thinkingBudget": 0},
+        }
         if yt_urls:
-            gen_config["maxOutputTokens"] = 220 if max_lines == 1 else 500
+            gen_config["maxOutputTokens"] = 220 if max_lines == 1 else 900
             gen_config["mediaResolution"] = "MEDIA_RESOLUTION_LOW"
         body = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},

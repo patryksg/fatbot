@@ -1,3 +1,4 @@
+"""Aliases: small owner-shortcut commands."""
 import supybot
 import supybot.world as world
 

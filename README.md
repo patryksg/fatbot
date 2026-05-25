@@ -39,7 +39,8 @@ pipx inject limnoria PySocks --pip-args="--no-deps"
   Cloudflare). Single shared `cc.Session()`, cookie jar persistence, SSRF
   guard via `getaddrinfo`.
 - **`PySocks`** — required for `socks5h://` URLs in requests/urllib, used
-  by ShrinkUrl's `_getIsgdUrl` to route through cloudflare-warp.
+  to route a retry through cloudflare-warp when a page returns a bot
+  challenge (see the Title plugin's WARP two-pass below).
 
 ### System: cloudflare-warp (SOCKS5 proxy mode)
 
@@ -51,10 +52,12 @@ Debian package `cloudflare-warp` (repo
 route.** A default-route ("warp" mode) install will kill SSH because
 warp injects a tunnel interface and reroutes all egress.
 
-**Why:** is.gd is fronted by Cloudflare's anti-bot challenge and blocks
-VPS egress IPs with HTTP 403. Routing only is.gd traffic through
-WARP returns the actual short URL. Everything else (t.ly, reddit,
-fxtwitter, ...) continues to use the normal VPS egress.
+**Why:** some sites front their pages with a Cloudflare/Akamai anti-bot
+challenge that blocks VPS egress IPs. The Title plugin retries such a
+fetch through WARP (a residential-looking egress) to get the real page;
+everything else continues to use the normal VPS egress. (Historically
+this proxy was used by the ShrinkUrl plugin for is.gd, which has since
+been removed — WARP is now optional and only used by the Title two-pass.)
 
 **Setup / recovery sequence:**
 
@@ -79,9 +82,9 @@ warp-cli --accept-tos connect
 settings; `reg.json` + `settings.json` in `/var/lib/cloudflare-warp/`
 persist registration and mode across reboots.
 
-**Consumer:** only `plugins/ShrinkUrl/plugin.py::_getIsgdUrl`. If WARP
-is disconnected, that path falls back to tinyurl via direct egress —
-the bot stays functional, just no is.gd links.
+**Consumer:** the Title plugin's bot-challenge two-pass retry. If WARP
+is disconnected, the fetch simply stays on direct egress — the bot
+stays functional, it just can't retry challenge-walled pages.
 
 ## systemd
 
@@ -140,15 +143,32 @@ ChannelLogger (stock) is also loaded but does not appear in the
 
 Custom plugins currently installed:
 
-- **ChanModes** — auto-asserts a configured mode string when bot has +o
-- **Claude** — Claude-API-backed chat / Q&A; see [Claude plugin security](#claude-plugin-security)
-- **Greeter**, **Hamster**, **InfoToggle**, **Relay** — utility plugins
-- **ShrinkUrl** — overridden to default to is.gd via cloudflare-warp
-  SOCKS5; falls back to tinyurl
+- **Claude** — Claude-CLI-backed chat / Q&A (`!claude` / `!smart` / `!gem`
+  modes) with a per-channel "brain" recall and a Gemini fallback; see
+  [Claude plugin security](#claude-plugin-security)
+- **Create** — image / video generation (`!pic` / `!picnsfw` / `!video` /
+  `!videonsfw`) via Gemini and Runware, rehosted on a Zipline image host;
+  channel-gated by a `generative` capability
+- **EasyControl** — consolidated user/channel admin commands
+  (`cap`/`chancap`/`adduser`/`chanmode`/`topic` …) plus channel-mode and
+  topic enforcement. Supersedes the older **ChanModes**, **InfoToggle**,
+  **Aliases** and **TopicLock** plugins, which remain in the tree but are
+  no longer loaded.
+- **Seen** — `!seen <nick>` last-activity lookup, gated by a per-channel
+  `seen` capability
 - **Title** — URL-title snarfer using `curl_cffi`; combined-mode with
-  ShrinkUrl posts `<short> | <title>`; reddit/twitter special-cased
-  (rewrites to `old.reddit.com`, uses `api.fxtwitter.com`)
+  ShrinkUrl posts `<title> | <short>`; per-site brand prefixes and
+  reddit/twitter special-casing (rewrites to `old.reddit.com`, uses
+  `api.fxtwitter.com`); WARP two-pass retry on bot-challenge pages
+- **ShrinkUrl** — overridden to default to t.ly (Bearer-token API),
+  falling back through tinyurl → x0.no
 - **YouTube** — yt-dlp-backed metadata fetcher
+- **Ash** — Evil-Dead "Ash Williams" quote / persona responder
+- **Wikibear** — creepy-cheerful Wikipedia fact responder
+- **Relay** — relays public messages between two channels
+- **Greeter**, **Hamster**, **Repo** — small utility plugins
+- **ChanModes**, **InfoToggle**, **Aliases**, **TopicLock** — legacy
+  plugins, folded into **EasyControl** and no longer loaded
 
 ## Session cookies (reddit, YouTube)
 

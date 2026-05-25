@@ -157,7 +157,7 @@ NUDE_HINT_WORDS = (
     "see-through", "sheer", "lingerie only", "panties only",
 )
 
-# Per-image edit analysis: Claude reads the seed and returns tailored,
+# Per-image edit analysis: the local Claude CLI reads the seed and returns tailored,
 # strictly-SFW options (scene caption + artifact negatives + a strength
 # recommendation). The analysis NEVER mentions or is told about undressing —
 # the nudity terms are appended by code, not authored by Claude.
@@ -480,7 +480,7 @@ class Create(callbacks.Plugin):
 
     def _rehost_image(self, url, timeout):
         """Re-host an external image (e.g. a Runware edit result) on Zipline so
-        the posted link is a clean, short img.irc.example.org URL (no t.ly underscore
+        the posted link is a clean, short img.example.net URL (no t.ly underscore
         mangling). Returns the original URL on any failure."""
         try:
             data, ct = self._fetch_media(url, allow=("image/",), cap=EDIT_MAX_IMAGE_BYTES)
@@ -989,7 +989,7 @@ class Create(callbacks.Plugin):
         return obj if isinstance(obj, dict) else None
 
     def _analyze_via_claude(self, image_path):
-        """Claude reads the seed and returns SFW edit options (or None)."""
+        """the local Claude CLI reads the seed and returns SFW edit options (or None)."""
         env = {
             "HOME": "/home/botuser",
             "PATH": "/home/botuser/.local/bin:/usr/bin:/bin",
@@ -1019,7 +1019,7 @@ class Create(callbacks.Plugin):
         return self._parse_analysis(result.stdout)
 
     def _analyze_seed(self, raw, mime, timeout):
-        """Tailored SFW edit options for the seed: Claude (vision) first,
+        """Tailored SFW edit options for the seed: the local Claude CLI (vision) first,
         Gemini caption as fallback, else None. The undress instruction is NEVER
         sent here — this step only describes the scene."""
         ext = self._ext_for_mime(mime)
@@ -1104,7 +1104,7 @@ class Create(callbacks.Plugin):
             return
         if ct == "image/jpg":
             ct = "image/jpeg"
-        # Per-image SFW analysis (Claude vision; Gemini caption fallback).
+        # Per-image SFW analysis (the local Claude CLI vision; Gemini caption fallback).
         analysis = self._analyze_seed(data, ct, timeout) or {}
         caption = analysis.get("caption")
         neg_extra = analysis.get("negatives")

@@ -72,10 +72,10 @@ SYSTEM_PROMPT_NOARG = (
     "detail — names, dates, body counts, exact methods, the smell of "
     "it. Don't skim the horror; savour it. Then end with "
     f"'{SIGNOFF}' on its own line.\n\n"
-    "Hard rules: 2-4 IRC messages total — aim for the fuller treatment, "
-    "not the one-liner. Prefer 3 messages when there's enough material. "
+    "Hard rules: 2-6 IRC messages total — aim for the fuller treatment, "
+    "not the one-liner. Prefer 4-5 messages when there's enough material. "
     f"The closing line '{SIGNOFF}' is MANDATORY and must always appear "
-    "as the final line on its own; if you run out of room, use a 4th "
+    "as the final line on its own; if you run out of room, use a 6th "
     "message just for the signoff. Each message under 380 chars. "
     "Separate IRC messages with a single blank line. Never include URLs "
     "or links of any kind. No preamble, no quotes, no meta, no "
@@ -95,10 +95,10 @@ SYSTEM_PROMPT_QUESTION = (
     "concrete grisly detail (names, dates, body counts, methods, the "
     "smell of it); savour the horror, don't skim it. Blank line, "
     f"'{SIGNOFF}' on its own line.\n\n"
-    "Hard rules: 2-4 IRC messages total — aim for the fuller treatment, "
-    "not the one-liner. Prefer 3 messages when there's enough material. "
+    "Hard rules: 2-6 IRC messages total — aim for the fuller treatment, "
+    "not the one-liner. Prefer 4-5 messages when there's enough material. "
     f"The closing line '{SIGNOFF}' is MANDATORY and must always appear "
-    "as the final line on its own; if you run out of room, use a 4th "
+    "as the final line on its own; if you run out of room, use a 6th "
     "message just for the signoff. Each message under 380 chars. "
     "Separate IRC messages with a single blank line. Never include URLs "
     "or links of any kind. No preamble, no quotes, no meta, no "
@@ -213,11 +213,11 @@ class Wikibear(callbacks.Plugin):
             irc.reply("(no reply)")
             return
 
-        # Split into IRC messages on blank lines. Cap at 4 (signoff may
+        # Split into IRC messages on blank lines. Cap at 6 (signoff may
         # need its own message). Within each message keep newlines so
         # multi-line content stays together.
         chunks = [c.strip() for c in re.split(r"\n\s*\n", out) if c.strip()]
-        chunks = chunks[:4]
+        chunks = chunks[:6]
         emitted_lines = []
         for chunk in chunks:
             for line in chunk.split("\n"):

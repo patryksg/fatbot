@@ -19,9 +19,9 @@ class ClaudeMode(registry.OnlySomeStrings):
 conf.registerChannelValue(Claude, 'mode',
     ClaudeMode('haiku',
         'Active model for this channel. '
-        '"haiku" = Claude Haiku single-line. '
-        '"opus"  = Claude Opus up to 3 lines (smart). '
-        '"gem"   = Gemini 2.5 Flash single-line. '
+        '"haiku" = Claude Haiku, up to 6 lines. '
+        '"opus"  = Claude Opus up to 6 lines (smart). '
+        '"gem"   = Gemini 2.5 Flash, up to 6 lines. '
         'Switched in-channel via !claude / !smart / !gem.'))
 
 conf.registerChannelValue(Claude, 'geminiFallback',
