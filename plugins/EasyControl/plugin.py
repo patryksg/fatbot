@@ -6,7 +6,7 @@
 #
 #   capabilities : cap, uncap, remcap, chancap, unchancap
 #   users        : adduser, deluser, addhost
-#   feature flags: info (URL titles), ai (!claude), chanmode (mode enforcement)
+#   feature flags: info (URL titles), chanmode (mode enforcement)
 #   behaviour    : auto-enforces channel modes when opped; topic lock/guard
 #
 # All commands are owner-gated.
@@ -83,7 +83,7 @@ def _parse_modes(s):
 
 class EasyControl(callbacks.Plugin):
     """User & channel administration: !cap, !uncap, !remcap, !chancap,
-    !unchancap, !adduser, !deluser, !addhost, !info, !ai, !chanmode, !topic.
+    !unchancap, !adduser, !deluser, !addhost, !info, !chanmode, !topic.
     Also auto-enforces channel modes when opped and guards locked topics."""
 
     def __init__(self, irc):
@@ -209,25 +209,6 @@ class EasyControl(callbacks.Plugin):
             _set_channel_cfg("Title", "useShrinkUrl", channel, False)
             irc.reply("URL titles + shortening: OFF for " + channel)
     info = wrap(info, [optional("channel"), ("literal", ("on", "off"))])
-
-    def ai(self, irc, msg, args, channel, toggle):
-        """[<#channel>] on|off
-
-        Grant or revoke the !claude feature for a channel.
-        """
-        if not self._check_owner(irc, msg):
-            return
-        channel = _resolve_channel(msg, channel)
-        if not channel:
-            irc.error("Could not determine channel.")
-            return
-        if toggle == "on":
-            _set_channel_cfg("Claude", "channelEnabled", channel, True)
-            irc.reply("AI (!claude) enabled for " + channel)
-        else:
-            _set_channel_cfg("Claude", "channelEnabled", channel, False)
-            irc.reply("AI (!claude) disabled for " + channel)
-    ai = wrap(ai, [optional("channel"), ("literal", ("on", "off"))])
 
     def chanmode(self, irc, msg, args, channel, modes):
         """[<#channel>] <modes>

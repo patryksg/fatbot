@@ -310,7 +310,7 @@ class Claude(callbacks.Plugin):
         self._ctx = _ContextStore(CONTEXT_TTL_SEC, CONTEXT_MAX_TURNS)
 
     def _switch_mode(self, irc, msg, new_mode: str, label: str):
-        if not self.registryValue('channelEnabled', msg.channel, irc.network):
+        if not ircdb.channels.getChannel(msg.channel).capabilities.check('ai'):
             return
         try:
             u = ircdb.users.getUser(msg.prefix)
@@ -387,7 +387,7 @@ class Claude(callbacks.Plugin):
                 return
             question = candidate
 
-        if not self.registryValue('channelEnabled', target, irc.network):
+        if not ircdb.channels.getChannel(target).capabilities.check('ai'):
             return
         cap = ircdb.makeChannelCapability(target, CAPABILITY)
         try:

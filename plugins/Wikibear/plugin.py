@@ -7,14 +7,18 @@ source, then segues "Speaking of X..." into a tangential horror fact with
 its own source.
 
 Uses the claude CLI with WebSearch (Pro OAuth). Long URLs are shortened via
-is.gd through the WARP SOCKS5 proxy on 127.0.0.1:40000.
+t.ly (Bearer token from ShrinkUrl config).
 """
 
 import os
 import re
 import subprocess
 
+import json
+
+import supybot.conf as conf
 import supybot.ircdb as ircdb
+import supybot.utils as utils
 import supybot.callbacks as callbacks
 from supybot.commands import wrap, optional
 
@@ -23,7 +27,7 @@ CLAUDE_CONFIG_DIR = "/home/botuser/runbot/.claude"
 CLAUDE_MODEL = "claude-opus-4-7"
 SIGNOFF = "I'm wikibeaaaaaaaaaaar!!"
 
-WARP_SOCKS = "127.0.0.1:40000"
+TLY_API = "https://t.ly/api/v1/link/shorten"
 
 PERSONALITY = (
     "You are Wiki Bear — the Conan O'Brien-bit talking teddy bear that "
@@ -107,27 +111,24 @@ SYSTEM_PROMPT_QUESTION = (
 
 
 def _shorten_url(url: str, timeout: int = 6) -> str:
-    """Shorten a single URL via is.gd through WARP SOCKS5. Falls back to original."""
+    """Shorten a single URL via t.ly. Falls back to original."""
     if not url or len(url) < 30:
         return url
     try:
-        # is.gd simple API; route through WARP socks proxy.
-        r = subprocess.run(
-            [
-                "curl", "-fsS",
-                "--max-time", str(timeout),
-                "--socks5-hostname", WARP_SOCKS,
-                "--get",
-                "--data-urlencode", f"url={url}",
-                "--data-urlencode", "format=simple",
-                "https://is.gd/create.php",
-            ],
-            capture_output=True, text=True, timeout=timeout + 2,
-        )
-        if r.returncode == 0:
-            short = r.stdout.strip()
-            if short.startswith("http"):
-                return short
+        token = conf.supybot.plugins.ShrinkUrl.tlyAccessToken()
+        if not token:
+            return url
+        headers = {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json',
+        }
+        data = json.dumps({'long_url': url}).encode('utf-8')
+        text = utils.web.getUrl(TLY_API, headers=headers, data=data,
+                                timeout=timeout).decode()
+        result = json.loads(text)
+        short = result.get('short_url')
+        if short and short.startswith('http'):
+            return short
     except Exception:
         pass
     return url
@@ -137,7 +138,7 @@ _URL_RE = re.compile(r"https?://[^\s)>\]]+")
 
 
 def _shorten_inline(line: str) -> str:
-    """Replace every URL in a line with its is.gd short form."""
+    """Replace every URL in a line with its t.ly short form."""
     def sub(m):
         return _shorten_url(m.group(0))
     return _URL_RE.sub(sub, line)
