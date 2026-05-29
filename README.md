@@ -144,7 +144,10 @@ ChannelLogger (stock) is also loaded but does not appear in the
 Custom plugins currently installed:
 
 - **Claude** — Claude-CLI-backed chat / Q&A (`!claude` / `!smart` / `!gem`
-  modes) with a per-channel "brain" recall and a Gemini fallback; see
+  modes) with a per-channel "brain" recall and a Gemini fallback. Exposes a
+  small MCP tool suite to the model: an image viewer, a URL fetcher, YouTube
+  transcript/download tools, and a Reddit-video analyzer (Gemini Files API,
+  with optional rehosting on the Zipline image host). See
   [Claude plugin security](#claude-plugin-security)
 - **Create** — image / video generation (`!pic` / `!picnsfw` / `!video` /
   `!videonsfw`) via Gemini and Runware, rehosted on a Zipline image host;
@@ -162,7 +165,9 @@ Custom plugins currently installed:
   `api.fxtwitter.com`); WARP two-pass retry on bot-challenge pages
 - **ShrinkUrl** — overridden to default to t.ly (Bearer-token API),
   falling back through tinyurl → x0.no
-- **YouTube** — yt-dlp-backed metadata fetcher
+- **YouTube** — yt-dlp-backed metadata snarfer, plus `!ytdl <url>` which
+  downloads a video and rehosts it on the Zipline image host (gated by a
+  per-channel `ytdl` capability)
 - **Ash** — Evil-Dead "Ash Williams" quote / persona responder
 - **Wikibear** — creepy-cheerful Wikipedia fact responder
 - **Relay** — relays public messages between two channels
@@ -242,8 +247,12 @@ vars redirect any writes into `ReadWritePaths` so nothing escapes to `$HOME`.
   re-resolves at connect time (TOCTOU window).
 - Session cookies (`reddit-cookies.txt`, `youtube-cookies.txt`) contain live
   browser tokens — if the bot process is compromised they're exposed.
-- The MCP image viewer (`mcp_imageview.py`) fetches arbitrary URLs from IRC
-  on model request. SSRF-guarded and image-only, but the attack surface exists.
+- The MCP tools (`mcp_imageview.py`, `mcp_fetch.py`, `mcp_youtube.py`,
+  `mcp_reddit.py`) fetch arbitrary URLs from IRC on model request — image
+  viewing, generic fetch, and YouTube/Reddit video download + Gemini Files API
+  analysis with optional Zipline rehosting. They are SSRF-guarded and
+  scope-limited (image-only, YouTube/Reddit hosts), but the network attack
+  surface exists and the video tools shell out to `yt-dlp`/`ffmpeg`.
 
 ---
 
