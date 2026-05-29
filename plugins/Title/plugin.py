@@ -341,6 +341,69 @@ def _strip_reddit_suffix(title, url):
 _REDDIT_LOGO = '\x0307,00 ▲ \x0300,07 reddit \x03 '
 
 
+# Google Maps is a JS SPA; the served HTML has no useful <title>. For URL
+# forms that name a destination in the path we derive the title locally
+# without fetching. Coord-only URLs (/maps/@lat,lng,...) return None.
+_GMAPS_PLACE_RE = re.compile(r'^/maps/place/([^/]+)')
+_GMAPS_SEARCH_RE = re.compile(r'^/maps/search/([^/]+)')
+_GMAPS_DIR_RE = re.compile(r'^/maps/dir/([^/]*)/([^/]+)')
+_GMAPS_COORD_SEG_RE = re.compile(r'^@?-?\d+\.\d+,-?\d+\.\d+')
+
+
+def _is_google_maps_url(url):
+    """True iff url's host is google.<tld> (or maps.google.<tld>) and the
+    path is the /maps tree."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return False
+    host = (parsed.hostname or '').lower()
+    if host.startswith('www.'):
+        host = host[4:]
+    if 'google' not in host.split('.'):
+        return False
+    path = parsed.path or ''
+    return path == '/maps' or path.startswith('/maps/')
+
+
+def _gmaps_decode_segment(segment):
+    """URL-decode a path segment to its display form. Returns None for
+    empty segments or coord-only blobs like '@48.858,2.295,17z' that
+    aren't meaningful as titles."""
+    s = urllib.parse.unquote_plus(segment).strip()
+    if not s:
+        return None
+    if _GMAPS_COORD_SEG_RE.match(s):
+        return None
+    return s
+
+
+def _google_maps_url_title(url):
+    """Derive a title from a Google Maps URL path. Returns the place
+    name (for /place/), 'A → B' (for /dir/), 'Search: query' (for
+    /search/), or None for coord-only or unrecognized URLs."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return None
+    path = parsed.path or ''
+    m = _GMAPS_PLACE_RE.match(path)
+    if m:
+        return _gmaps_decode_segment(m.group(1))
+    m = _GMAPS_DIR_RE.match(path)
+    if m:
+        origin = _gmaps_decode_segment(m.group(1)) or 'Current location'
+        dest = _gmaps_decode_segment(m.group(2))
+        if dest:
+            return f'{origin} → {dest}'
+    m = _GMAPS_SEARCH_RE.match(path)
+    if m:
+        query = _gmaps_decode_segment(m.group(1))
+        if query:
+            return f'Search: {query}'
+    return None
+
+
 _TWITTER_HOSTS = {'x.com', 'www.x.com', 'twitter.com', 'www.twitter.com',
                   'mobile.twitter.com'}
 _TWEET_PATH_RE = re.compile(r'^/[^/]+/status/(\d+)')
@@ -450,6 +513,90 @@ _HEISE_LOGO    = '\x0300,04\x02 h: \x02\x03 '
 _HN_LOGO       = '\x0301,07\x02 Y \x02\x03 '
 _WIKIPEDIA_LOGO = '\x0301,00\x02 W \x02\x03 '
 _ZDNET_LOGO    = '\x0301,09\x02 ZD \x02\x03 '
+# ----- Video / Social logos -----
+_YT_LOGO       = '\x02\x0300,04 ▶ \x0300,01 YouTube \x03\x02 '
+_PINTEREST_LOGO = '\x0300,04\x02 P \x02\x03 '
+_DISCORD_LOGO  = '\x0300,12\x02 Discord \x02\x03 '
+_TELEGRAM_LOGO = '\x0300,12\x02 ✈ \x02\x03 '
+_TUMBLR_LOGO   = '\x0300,02\x02 t \x02\x03 '
+_VIMEO_LOGO    = '\x0300,10\x02 Vimeo \x02\x03 '
+_MEDIUM_LOGO   = '\x0300,01\x02 M \x02\x03 '
+_SUBSTACK_LOGO = '\x0300,07\x02 S \x02\x03 '
+_PATREON_LOGO  = '\x0300,05\x02 p \x02\x03 '
+_QUORA_LOGO    = '\x0300,04\x02 Q \x02\x03 '
+_MASTODON_LOGO = '\x0300,06\x02 🐘 \x02\x03 '
+_FLICKR_LOGO   = '\x02\x0300,02 Fl\x0304,02ickr \x03\x02 '
+_DA_LOGO       = '\x0300,03\x02 dA \x02\x03 '
+_KS_LOGO       = '\x0300,03\x02 KS \x02\x03 '
+# ----- Entertainment logos -----
+_NETFLIX_LOGO  = '\x0300,04\x02 N \x02\x03 '
+_RT_LOGO       = '\x0300,04\x02 🍅 \x02\x03 '
+_LBOXD_LOGO    = '\x0300,07\x02 LB \x02\x03 '
+_METACRITIC_LOGO = '\x0300,03\x02 MC \x02\x03 '
+_FANDOM_LOGO   = '\x0300,04\x02 fan \x02\x03 '
+_TVTROPES_LOGO = '\x0300,06\x02 TVT \x02\x03 '
+# ----- Tech / Dev logos -----
+_SO_LOGO       = '\x0301,07\x02 SO \x02\x03 '
+_NPM_LOGO      = '\x0300,04\x02 npm \x02\x03 '
+_MDN_LOGO      = '\x0300,01\x02 MDN \x02\x03 '
+_HF_LOGO       = '\x0301,08\x02 🤗 \x02\x03 '
+_CODEPEN_LOGO  = '\x0300,14\x02 CP \x02\x03 '
+# ----- Big Tech / Search logos -----
+_GOOGLE_LOGO   = ('\x02\x0304,00 G\x0303,00o\x0304,00o'
+                  '\x0312,00g\x0304,00l\x0308,00e \x03\x02 ')
+_MS_LOGO       = ('\x02\x0304,00 ■\x0303,00■'
+                  '\x0312,00■\x0308,00■ \x03\x02 ')
+_APPLE_LOGO    = '\x0300,14\x02 Apple \x02\x03 '
+# ----- Shopping logos -----
+_ETSY_LOGO     = '\x0300,07\x02 etsy \x02\x03 '
+_ALIEXPRESS_LOGO = '\x0300,07\x02 AliX \x02\x03 '
+_WALMART_LOGO  = '\x0300,02\x02 Wmt \x02\x03 '
+_TARGET_LOGO   = '\x0300,04\x02 ⊙ \x02\x03 '
+# ----- News logos -----
+_REUTERS_LOGO  = '\x0301,07\x02 R \x02\x03 '
+_AP_LOGO       = '\x0300,04\x02 AP \x02\x03 '
+_WAPO_LOGO     = '\x0308,01\x02 WaPo \x02\x03 '
+_FOX_LOGO      = '\x0300,02\x02 FOX \x02\x03 '
+_AJ_LOGO       = '\x0301,08\x02 AJ \x02\x03 '
+_BLOOMBERG_LOGO = '\x0300,14\x02 BBG \x02\x03 '
+_DW_LOGO       = '\x0301,11\x02 DW \x02\x03 '
+_F24_LOGO      = '\x0300,04\x02 F24 \x02\x03 '
+_RFI_LOGO      = '\x0300,02\x02 RFI \x02\x03 '
+_NHK_LOGO      = '\x0300,04\x02 NHK \x02\x03 '
+_SCMP_LOGO     = '\x0300,14\x02 SCMP \x02\x03 '
+_TIMES_LOGO    = '\x0300,05\x02 Times \x02\x03 '
+_TELEGRAPH_LOGO = '\x0300,12\x02 Tel \x02\x03 '
+_INDEP_LOGO    = '\x0300,04\x02 i \x02\x03 '
+_SKY_LOGO      = '\x0300,02\x02 SKY \x02\x03 '
+_LEMONDE_LOGO  = '\x0300,01\x02 LM \x02\x03 '
+_LEFIGARO_LOGO = '\x0300,12\x02 LF \x02\x03 '
+_SZ_LOGO       = '\x0300,04\x02 SZ \x02\x03 '
+_ZEIT_LOGO     = '\x0300,01\x02 ZEIT \x02\x03 '
+_ELPAIS_LOGO   = '\x0300,14\x02 EP \x02\x03 '
+_NDTV_LOGO     = '\x0300,04\x02 NDTV \x02\x03 '
+_POLITICO_LOGO = '\x0300,05\x02 POL \x02\x03 '
+_ATLANTIC_LOGO = '\x0300,10\x02 Atl \x02\x03 '
+_AXIOS_LOGO    = '\x0300,06\x02 axios \x02\x03 '
+_NPR_LOGO      = '\x0315,01\x02 NPR \x02\x03 '
+# ----- Reference / Education logos -----
+_BRITANNICA_LOGO = '\x0300,02\x02 EB \x02\x03 '
+_IA_LOGO       = '\x0300,14\x02 IA \x02\x03 '
+_KA_LOGO       = '\x0300,03\x02 KA \x02\x03 '
+# ----- Finance logos -----
+_YAHOO_LOGO    = '\x0300,06\x02 Y! \x02\x03 '
+# ----- Maps / Travel logos -----
+_OSM_LOGO      = '\x0300,03\x02 OSM \x02\x03 '
+_TRIPADVISOR_LOGO = '\x0300,03\x02 TA \x02\x03 '
+_BOOKING_LOGO  = '\x0300,02\x02 Bkg \x02\x03 '
+_AIRBNB_LOGO   = '\x0300,13\x02 bnb \x02\x03 '
+# ----- Games logos -----
+_IGN_LOGO      = '\x0300,04\x02 IGN \x02\x03 '
+_ITCH_LOGO     = '\x0300,13\x02 itch \x02\x03 '
+# ----- Misc logos -----
+_CLOUDFLARE_LOGO = '\x0301,07\x02 CF \x02\x03 '
+_NOTION_LOGO   = '\x0300,01\x02 Notion \x02\x03 '
+_CANVA_LOGO    = '\x0300,06\x02 Canva \x02\x03 '
+_PASTEBIN_LOGO = '\x0300,14\x02 pb \x02\x03 '
 
 
 # ----- Title strip patterns (case-insensitive) -----
@@ -498,6 +645,107 @@ _HN_TAIL       = re.compile(
 _WIKIPEDIA_TAIL = re.compile(
     r'\s*[|\-:·—–]\s*Wikipedia(?:,\s+the\s+free\s+encyclopedia)?\s*$', re.I)
 _ZDNET_TAIL    = re.compile(r'\s*[|\-:·—–]\s*ZDNET\s*$', re.I)
+# ----- Video / Social tails -----
+_YT_TAIL       = re.compile(r'\s*[|\-:·—–]\s*YouTube\s*$', re.I)
+_PINTEREST_TAIL = re.compile(r'\s*[|\-:·]\s*Pinterest\s*$', re.I)
+_DISCORD_TAIL  = re.compile(r'\s*[|\-:·—]\s*Discord\s*$', re.I)
+_TELEGRAM_TAIL = re.compile(r'\s*[-–|]\s*Telegram\s*$', re.I)
+_TUMBLR_TAIL   = re.compile(r'\s*[|\-:·]\s*Tumblr\s*$', re.I)
+_VIMEO_TAIL    = re.compile(
+    r'\s*(?:on\s+Vimeo|[|\-:·]\s*Vimeo)\s*$', re.I)
+_MEDIUM_TAIL   = re.compile(r'\s*[|\-:·—]\s*Medium\s*$', re.I)
+_SUBSTACK_TAIL = re.compile(r'\s*[|\-:·]\s*Substack\s*$', re.I)
+_PATREON_TAIL  = re.compile(r'\s*[|\-:·—]\s*Patreon\s*$', re.I)
+_QUORA_TAIL    = re.compile(r'\s*[|\-:·—]\s*Quora\s*$', re.I)
+_MASTODON_TAIL = re.compile(r'\s*[|\-:·—]\s*Mastodon\s*$', re.I)
+_FLICKR_TAIL   = re.compile(r'\s*[|\-:·]\s*Flickr\s*$', re.I)
+_DA_TAIL       = re.compile(r'\s*[|\-:·—]\s*DeviantArt\s*$', re.I)
+_KS_TAIL       = re.compile(r'\s*[|\-:·]\s*Kickstarter\s*$', re.I)
+# ----- Entertainment tails -----
+_NETFLIX_TAIL  = re.compile(
+    r'\s*[|\-:·]\s*(?:Watch\s+on\s+)?Netflix\s*$', re.I)
+_RT_TAIL       = re.compile(r'\s*[|\-:·]\s*Rotten\s+Tomatoes\s*$', re.I)
+_LBOXD_TAIL    = re.compile(r'\s*[·•|\-]\s*Letterboxd\s*$', re.I)
+_METACRITIC_TAIL = re.compile(r'\s*[|\-:·]\s*Metacritic\s*$', re.I)
+_FANDOM_TAIL   = re.compile(
+    r'\s*(?:\s*\|[^|]*)?\s*[|\-:·—]\s*Fandom\s*$', re.I)
+_TVTROPES_TAIL = re.compile(r'\s*[|\-:·—]\s*TV\s+Tropes\s*$', re.I)
+# ----- Tech / Dev tails -----
+_SO_TAIL       = re.compile(
+    r'\s*[|\-:·—]\s*(?:Stack\s+Overflow|.+\s+Stack\s+Exchange)\s*$', re.I)
+_NPM_TAIL      = re.compile(r'\s*[-–|]\s*npm\s*$', re.I)
+_MDN_TAIL      = re.compile(
+    r'\s*[|\-:·]\s*(?:MDN\s+Web\s+Docs|MDN)\s*$', re.I)
+_HF_TAIL       = re.compile(r'\s*[|\-:·—]\s*Hugging\s+Face\s*$', re.I)
+_CODEPEN_TAIL  = re.compile(r'\s*[|\-:·]\s*CodePen\s*$', re.I)
+# ----- Big Tech / Search tails -----
+_GOOGLE_TAIL   = re.compile(
+    r'\s*[|\-:·—–]\s*Google'
+    r'(?:\s+(?:Search|Docs|Sheets|Slides|Maps|Drive|Photos|'
+    r'Translate|Scholar|Play|Meet|Forms|Calendar))?\s*$', re.I)
+_MS_TAIL       = re.compile(
+    r'\s*[|\-:·—–]\s*Microsoft'
+    r'(?:\s+(?:Azure|365|Office|Learn|Support))?\s*$', re.I)
+_APPLE_TAIL    = re.compile(r'\s*[|\-:·—–]\s*Apple\s*$', re.I)
+# ----- Shopping tails -----
+_ETSY_TAIL     = re.compile(r'\s*[|\-:·]\s*Etsy\s*$', re.I)
+_ALIEXPRESS_TAIL = re.compile(r'\s*[|\-:·—]\s*AliExpress\s*$', re.I)
+_WALMART_TAIL  = re.compile(r'\s*[|\-:·—]\s*Walmart(?:\.com)?\s*$', re.I)
+_TARGET_TAIL   = re.compile(r'\s*[|\-:·—]\s*Target\s*$', re.I)
+# ----- News tails -----
+_REUTERS_TAIL  = re.compile(r'\s*[|\-:·—]\s*Reuters\s*$', re.I)
+_AP_TAIL       = re.compile(
+    r'\s*[|\-:·—]\s*(?:The\s+)?Associated\s+Press\s*$', re.I)
+_WAPO_TAIL     = re.compile(
+    r'\s*[|\-:·—–]\s*(?:The\s+)?Washington\s+Post\s*$', re.I)
+_FOX_TAIL      = re.compile(r'\s*[|\-:·—]\s*Fox\s+News\s*$', re.I)
+_AJ_TAIL       = re.compile(
+    r'\s*[|\-:·—]\s*Al\s+Jazeera(?:\s+English)?\s*$', re.I)
+_BLOOMBERG_TAIL = re.compile(r'\s*[|\-:·—]\s*Bloomberg\s*$', re.I)
+_DW_TAIL       = re.compile(
+    r'\s*[|\-:·—–]\s*DW(?:\s*[–\-]\s*Made\s+for\s+minds)?\s*$', re.I)
+_F24_TAIL      = re.compile(r'\s*[|\-:·—]\s*France\s+24\s*$', re.I)
+_RFI_TAIL      = re.compile(r'\s*[|\-:·—]\s*RFI\s*$', re.I)
+_NHK_TAIL      = re.compile(
+    r'\s*[|\-:·—]\s*NHK\s+WORLD(?:-JAPAN)?\s*$', re.I)
+_SCMP_TAIL     = re.compile(
+    r'\s*[|\-:·—]\s*South\s+China\s+Morning\s+Post\s*$', re.I)
+_TIMES_TAIL    = re.compile(r'\s*[|\-:·—–]\s*The\s+Times\s*$', re.I)
+_TELEGRAPH_TAIL = re.compile(r'\s*[|\-:·—]\s*The\s+Telegraph\s*$', re.I)
+_INDEP_TAIL    = re.compile(r'\s*[|\-:·—]\s*The\s+Independent\s*$', re.I)
+_SKY_TAIL      = re.compile(r'\s*[|\-:·—]\s*Sky\s+News\s*$', re.I)
+_LEMONDE_TAIL  = re.compile(r'\s*[|\-:·—]\s*Le\s+Monde\s*$', re.I)
+_LEFIGARO_TAIL = re.compile(r'\s*[|\-:·—]\s*Le\s+Figaro\s*$', re.I)
+_SZ_TAIL       = re.compile(
+    r'\s*[|\-:·—–]\s*S[uü]ddeutsche\s+Zeitung\s*$', re.I)
+_ZEIT_TAIL     = re.compile(r'\s*[|\-:·—]\s*ZEIT\s+ONLINE\s*$', re.I)
+_ELPAIS_TAIL   = re.compile(r'\s*[|\-:·—]\s*El\s+Pa[ií]s\s*$', re.I)
+_NDTV_TAIL     = re.compile(r'\s*[|\-:·—]\s*NDTV(?:\.com)?\s*$', re.I)
+_POLITICO_TAIL = re.compile(r'\s*[|\-:·—]\s*POLITICO\s*$', re.I)
+_ATLANTIC_TAIL = re.compile(r'\s*[|\-:·—]\s*The\s+Atlantic\s*$', re.I)
+_AXIOS_TAIL    = re.compile(r'\s*[|\-:·—]\s*Axios\s*$', re.I)
+_NPR_TAIL      = re.compile(r'\s*[|\-:·—]\s*NPR\s*$', re.I)
+# ----- Reference / Education tails -----
+_BRITANNICA_TAIL = re.compile(r'\s*[|\-:·—]\s*Britannica\s*$', re.I)
+_IA_TAIL       = re.compile(
+    r'\s*[|\-:·—]\s*(?:Internet\s+)?Archive\s*$', re.I)
+_KA_TAIL       = re.compile(r'\s*[|\-:·—]\s*Khan\s+Academy\s*$', re.I)
+# ----- Finance tails -----
+_YAHOO_TAIL    = re.compile(
+    r'\s*[|\-:·—]\s*Yahoo(?:\s+(?:Finance|News|Sports|Mail))?\s*$', re.I)
+# ----- Maps / Travel tails -----
+_OSM_TAIL      = re.compile(r'\s*[|\-:·—]\s*OpenStreetMap\s*$', re.I)
+_TRIPADVISOR_TAIL = re.compile(r'\s*[|\-:·—]\s*Tripadvisor\s*$', re.I)
+_BOOKING_TAIL  = re.compile(r'\s*[|\-:·—]\s*Booking\.com\s*$', re.I)
+_AIRBNB_TAIL   = re.compile(r'\s*[|\-:·—]\s*Airbnb\s*$', re.I)
+# ----- Games tails -----
+_IGN_TAIL      = re.compile(r'\s*[|\-:·—]\s*IGN\s*$', re.I)
+_ITCH_TAIL     = re.compile(r'\s*[|\-:·—]\s*itch\.io\s*$', re.I)
+# ----- Misc tails -----
+_CLOUDFLARE_TAIL = re.compile(r'\s*[|\-:·—]\s*Cloudflare\s*$', re.I)
+_NOTION_TAIL   = re.compile(r'\s*[|\-:·—]\s*Notion\s*$', re.I)
+_CANVA_TAIL    = re.compile(r'\s*[|\-:·—]\s*Canva\s*$', re.I)
+_PASTEBIN_TAIL = re.compile(r'\s*[|\-:·—]\s*Pastebin(?:\.com)?\s*$', re.I)
 
 
 _BRANDS = (
@@ -572,6 +820,183 @@ _BRANDS = (
           _WIKIPEDIA_LOGO, _WIKIPEDIA_TAIL, None),
     Brand(_host_predicate(labels={'zdnet'}),
           _ZDNET_LOGO, _ZDNET_TAIL, None),
+    # ----- Video / Social -----
+    Brand(_host_predicate(exact={'youtube.com', 'youtu.be'},
+                          suffix={'.youtube.com'}),
+          _YT_LOGO, _YT_TAIL, None),
+    Brand(_host_predicate(exact={'pinterest.com', 'pin.it'},
+                          suffix={'.pinterest.com', '.pin.it'}),
+          _PINTEREST_LOGO, _PINTEREST_TAIL, None),
+    Brand(_host_predicate(exact={'discord.com', 'discord.gg'},
+                          suffix={'.discord.com', '.discord.gg'}),
+          _DISCORD_LOGO, _DISCORD_TAIL, None),
+    Brand(_host_predicate(exact={'t.me', 'telegram.org', 'telegram.me'},
+                          suffix={'.telegram.org'}),
+          _TELEGRAM_LOGO, _TELEGRAM_TAIL, None),
+    Brand(_host_predicate(exact={'tumblr.com'}, suffix={'.tumblr.com'}),
+          _TUMBLR_LOGO, _TUMBLR_TAIL, None),
+    Brand(_host_predicate(exact={'vimeo.com'}, suffix={'.vimeo.com'}),
+          _VIMEO_LOGO, _VIMEO_TAIL, None),
+    Brand(_host_predicate(exact={'medium.com'}, suffix={'.medium.com'}),
+          _MEDIUM_LOGO, _MEDIUM_TAIL, None),
+    Brand(_host_predicate(exact={'substack.com'}, suffix={'.substack.com'}),
+          _SUBSTACK_LOGO, _SUBSTACK_TAIL, None),
+    Brand(_host_predicate(exact={'patreon.com'}, suffix={'.patreon.com'}),
+          _PATREON_LOGO, _PATREON_TAIL, None),
+    Brand(_host_predicate(exact={'quora.com'}, suffix={'.quora.com'}),
+          _QUORA_LOGO, _QUORA_TAIL, None),
+    Brand(_host_predicate(exact={'mastodon.social', 'mastodon.online',
+                                  'fosstodon.org', 'infosec.exchange',
+                                  'hachyderm.io'},
+                          suffix={'.mastodon.social', '.mastodon.online'}),
+          _MASTODON_LOGO, _MASTODON_TAIL, None),
+    Brand(_host_predicate(exact={'flickr.com'}, suffix={'.flickr.com'}),
+          _FLICKR_LOGO, _FLICKR_TAIL, None),
+    Brand(_host_predicate(exact={'deviantart.com'}, suffix={'.deviantart.com'}),
+          _DA_LOGO, _DA_TAIL, None),
+    Brand(_host_predicate(exact={'kickstarter.com'}, suffix={'.kickstarter.com'}),
+          _KS_LOGO, _KS_TAIL, None),
+    # ----- Entertainment -----
+    Brand(_host_predicate(exact={'netflix.com'}, suffix={'.netflix.com'}),
+          _NETFLIX_LOGO, _NETFLIX_TAIL, None),
+    Brand(_host_predicate(exact={'rottentomatoes.com'},
+                          suffix={'.rottentomatoes.com'}),
+          _RT_LOGO, _RT_TAIL, None),
+    Brand(_host_predicate(exact={'letterboxd.com'}, suffix={'.letterboxd.com'}),
+          _LBOXD_LOGO, _LBOXD_TAIL, None),
+    Brand(_host_predicate(exact={'metacritic.com'}, suffix={'.metacritic.com'}),
+          _METACRITIC_LOGO, _METACRITIC_TAIL, None),
+    Brand(_host_predicate(exact={'fandom.com'},
+                          suffix={'.fandom.com', '.wikia.com', '.wikia.org'}),
+          _FANDOM_LOGO, _FANDOM_TAIL, None),
+    Brand(_host_predicate(exact={'tvtropes.org'}),
+          _TVTROPES_LOGO, _TVTROPES_TAIL, None),
+    # ----- Tech / Dev -----
+    Brand(_host_predicate(exact={'stackoverflow.com'},
+                          suffix={'.stackoverflow.com', '.stackexchange.com'}),
+          _SO_LOGO, _SO_TAIL, None),
+    Brand(_host_predicate(exact={'npmjs.com'}, suffix={'.npmjs.com'}),
+          _NPM_LOGO, _NPM_TAIL, None),
+    Brand(_host_predicate(exact={'developer.mozilla.org'}),
+          _MDN_LOGO, _MDN_TAIL, None),
+    Brand(_host_predicate(exact={'huggingface.co'}, suffix={'.huggingface.co'}),
+          _HF_LOGO, _HF_TAIL, None),
+    Brand(_host_predicate(exact={'codepen.io'}, suffix={'.codepen.io'}),
+          _CODEPEN_LOGO, _CODEPEN_TAIL, None),
+    # ----- Big Tech / Search -----
+    Brand(_host_predicate(labels={'google'}),
+          _GOOGLE_LOGO, _GOOGLE_TAIL, None),
+    Brand(_host_predicate(exact={'microsoft.com', 'msn.com', 'office.com',
+                                  'azure.com', 'bing.com'},
+                          suffix={'.microsoft.com', '.office.com', '.azure.com'}),
+          _MS_LOGO, _MS_TAIL, None),
+    Brand(_host_predicate(exact={'apple.com'}, suffix={'.apple.com'}),
+          _APPLE_LOGO, _APPLE_TAIL, None),
+    # ----- Shopping -----
+    Brand(_host_predicate(exact={'etsy.com'}, suffix={'.etsy.com'}),
+          _ETSY_LOGO, _ETSY_TAIL, None),
+    Brand(_host_predicate(exact={'aliexpress.com', 'aliexpress.us'},
+                          suffix={'.aliexpress.com'}),
+          _ALIEXPRESS_LOGO, _ALIEXPRESS_TAIL, None),
+    Brand(_host_predicate(exact={'walmart.com'}, suffix={'.walmart.com'}),
+          _WALMART_LOGO, _WALMART_TAIL, None),
+    Brand(_host_predicate(exact={'target.com'}, suffix={'.target.com'}),
+          _TARGET_LOGO, _TARGET_TAIL, None),
+    # ----- News -----
+    Brand(_host_predicate(exact={'reuters.com'}, suffix={'.reuters.com'}),
+          _REUTERS_LOGO, _REUTERS_TAIL, None),
+    Brand(_host_predicate(exact={'apnews.com'}, suffix={'.apnews.com'}),
+          _AP_LOGO, _AP_TAIL, None),
+    Brand(_host_predicate(exact={'washingtonpost.com'},
+                          suffix={'.washingtonpost.com'}),
+          _WAPO_LOGO, _WAPO_TAIL, None),
+    Brand(_host_predicate(exact={'foxnews.com'}, suffix={'.foxnews.com'}),
+          _FOX_LOGO, _FOX_TAIL, None),
+    Brand(_host_predicate(exact={'aljazeera.com', 'aljazeera.net'},
+                          suffix={'.aljazeera.com', '.aljazeera.net'}),
+          _AJ_LOGO, _AJ_TAIL, None),
+    Brand(_host_predicate(exact={'bloomberg.com'}, suffix={'.bloomberg.com'}),
+          _BLOOMBERG_LOGO, _BLOOMBERG_TAIL, None),
+    Brand(_host_predicate(exact={'dw.com'}, suffix={'.dw.com'}),
+          _DW_LOGO, _DW_TAIL, None),
+    Brand(_host_predicate(exact={'france24.com'}, suffix={'.france24.com'}),
+          _F24_LOGO, _F24_TAIL, None),
+    Brand(_host_predicate(exact={'rfi.fr'}, suffix={'.rfi.fr'}),
+          _RFI_LOGO, _RFI_TAIL, None),
+    Brand(_host_predicate(exact={'nhk.or.jp', 'nhk.jp'},
+                          suffix={'.nhk.or.jp', '.nhk.jp'}),
+          _NHK_LOGO, _NHK_TAIL, None),
+    Brand(_host_predicate(exact={'scmp.com'}, suffix={'.scmp.com'}),
+          _SCMP_LOGO, _SCMP_TAIL, None),
+    Brand(_host_predicate(exact={'thetimes.com', 'thetimes.co.uk'},
+                          suffix={'.thetimes.com', '.thetimes.co.uk'}),
+          _TIMES_LOGO, _TIMES_TAIL, None),
+    Brand(_host_predicate(exact={'telegraph.co.uk'},
+                          suffix={'.telegraph.co.uk'}),
+          _TELEGRAPH_LOGO, _TELEGRAPH_TAIL, None),
+    Brand(_host_predicate(exact={'independent.co.uk'},
+                          suffix={'.independent.co.uk'}),
+          _INDEP_LOGO, _INDEP_TAIL, None),
+    Brand(_host_predicate(exact={'news.sky.com', 'sky.com'},
+                          suffix={'.sky.com'}),
+          _SKY_LOGO, _SKY_TAIL, None),
+    Brand(_host_predicate(exact={'lemonde.fr'}, suffix={'.lemonde.fr'}),
+          _LEMONDE_LOGO, _LEMONDE_TAIL, None),
+    Brand(_host_predicate(exact={'lefigaro.fr'}, suffix={'.lefigaro.fr'}),
+          _LEFIGARO_LOGO, _LEFIGARO_TAIL, None),
+    Brand(_host_predicate(exact={'sueddeutsche.de'}, suffix={'.sueddeutsche.de'}),
+          _SZ_LOGO, _SZ_TAIL, None),
+    Brand(_host_predicate(exact={'zeit.de'}, suffix={'.zeit.de'}),
+          _ZEIT_LOGO, _ZEIT_TAIL, None),
+    Brand(_host_predicate(exact={'elpais.com'}, suffix={'.elpais.com'}),
+          _ELPAIS_LOGO, _ELPAIS_TAIL, None),
+    Brand(_host_predicate(exact={'ndtv.com'}, suffix={'.ndtv.com'}),
+          _NDTV_LOGO, _NDTV_TAIL, None),
+    Brand(_host_predicate(exact={'politico.com', 'politico.eu'},
+                          suffix={'.politico.com', '.politico.eu'}),
+          _POLITICO_LOGO, _POLITICO_TAIL, None),
+    Brand(_host_predicate(exact={'theatlantic.com'}, suffix={'.theatlantic.com'}),
+          _ATLANTIC_LOGO, _ATLANTIC_TAIL, None),
+    Brand(_host_predicate(exact={'axios.com'}, suffix={'.axios.com'}),
+          _AXIOS_LOGO, _AXIOS_TAIL, None),
+    Brand(_host_predicate(exact={'npr.org'}, suffix={'.npr.org'}),
+          _NPR_LOGO, _NPR_TAIL, None),
+    # ----- Reference / Education -----
+    Brand(_host_predicate(exact={'britannica.com'}, suffix={'.britannica.com'}),
+          _BRITANNICA_LOGO, _BRITANNICA_TAIL, None),
+    Brand(_host_predicate(exact={'archive.org'}, suffix={'.archive.org'}),
+          _IA_LOGO, _IA_TAIL, None),
+    Brand(_host_predicate(exact={'khanacademy.org'}, suffix={'.khanacademy.org'}),
+          _KA_LOGO, _KA_TAIL, None),
+    # ----- Finance -----
+    Brand(_host_predicate(labels={'yahoo'}),
+          _YAHOO_LOGO, _YAHOO_TAIL, None),
+    # ----- Maps / Travel -----
+    Brand(_host_predicate(exact={'openstreetmap.org'},
+                          suffix={'.openstreetmap.org'}),
+          _OSM_LOGO, _OSM_TAIL, None),
+    Brand(_host_predicate(exact={'tripadvisor.com'},
+                          suffix={'.tripadvisor.com'}),
+          _TRIPADVISOR_LOGO, _TRIPADVISOR_TAIL, None),
+    Brand(_host_predicate(exact={'booking.com'}, suffix={'.booking.com'}),
+          _BOOKING_LOGO, _BOOKING_TAIL, None),
+    Brand(_host_predicate(exact={'airbnb.com'}, suffix={'.airbnb.com'}),
+          _AIRBNB_LOGO, _AIRBNB_TAIL, None),
+    # ----- Games -----
+    Brand(_host_predicate(exact={'ign.com'}, suffix={'.ign.com'}),
+          _IGN_LOGO, _IGN_TAIL, None),
+    Brand(_host_predicate(exact={'itch.io'}, suffix={'.itch.io'}),
+          _ITCH_LOGO, _ITCH_TAIL, None),
+    # ----- Misc -----
+    Brand(_host_predicate(exact={'cloudflare.com'}, suffix={'.cloudflare.com'}),
+          _CLOUDFLARE_LOGO, _CLOUDFLARE_TAIL, None),
+    Brand(_host_predicate(exact={'notion.so', 'notion.com'},
+                          suffix={'.notion.so', '.notion.com'}),
+          _NOTION_LOGO, _NOTION_TAIL, None),
+    Brand(_host_predicate(exact={'canva.com'}, suffix={'.canva.com'}),
+          _CANVA_LOGO, _CANVA_TAIL, None),
+    Brand(_host_predicate(exact={'pastebin.com'}, suffix={'.pastebin.com'}),
+          _PASTEBIN_LOGO, _PASTEBIN_TAIL, None),
 )
 
 
@@ -916,7 +1341,8 @@ class Title(callbacks.Plugin):
 
         suffix = ''
         if short:
-            suffix = f' | {ircutils.mircColor(short, "12")}'
+            link = short if '\x03' in short else ircutils.mircColor(short, "12")
+            suffix = f' | {link}'
 
         if not text:
             return f"{prefix.rstrip()}{suffix}"
@@ -932,7 +1358,8 @@ class Title(callbacks.Plugin):
         is word-truncated to whatever byte budget remains."""
         suffix = ''
         if short:
-            suffix = f' | {ircutils.mircColor(short, "12")}'
+            link = short if '\x03' in short else ircutils.mircColor(short, "12")
+            suffix = f' | {link}'
         overhead = len((prefix + suffix).encode('utf-8'))
         budget = max(1, max_len - overhead)
         body = _truncate_text_word_aware(title, budget)
@@ -952,6 +1379,11 @@ class Title(callbacks.Plugin):
             except Exception:
                 self.log.exception('Error snarfing tweet %s', url)
                 tweet = None
+        elif _is_google_maps_url(url):
+            # JS SPA: fetch_title can't see the place name. Derive from
+            # the URL path; None for coord-only URLs is fine, we'll just
+            # post the shortened URL.
+            title = _google_maps_url_title(url)
         else:
             try:
                 title = fetch_title(
@@ -987,6 +1419,11 @@ class Title(callbacks.Plugin):
             line = short
             if sub:
                 line = f"{_REDDIT_LOGO}{ircutils.bold(f'/r/{sub}')} · {line}"
+            elif brand is not None:
+                # Fetch produced no title (JS SPA, anti-bot block, etc.).
+                # Prepend the brand logo so the line still identifies what
+                # the shortened URL points to.
+                line = f"{brand.logo}{line}"
             line = _truncate_bytes(line, max_len)
         else:
             return

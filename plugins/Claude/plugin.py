@@ -18,13 +18,13 @@ CAPABILITY = "claude"
 CLAUDE_BIN = "/home/botuser/.local/bin/claude"
 CONFIG_DIR = "/home/botuser/runbot/.claude"
 MCP_CONFIG = "/home/botuser/runbot/plugins/Claude/mcp-imageview.json"
-MODEL = "claude-haiku-4-5-20251001"
-OPUS_MODEL = "claude-opus-4-7"
+MODEL = "claude-opus-4-8"
+OPUS_MODEL = "claude-opus-4-8"
 MAX_LINES_SMART = 6
 MAX_LINES_NORMAL = 6
 SMART_THINKING_TOKENS = 4000
 TIMEOUT_SEC = 150
-MAX_CHARS = 380
+MAX_CHARS = 420
 
 CONTEXT_TTL_SEC = 360
 CONTEXT_MAX_TURNS = 5
@@ -80,7 +80,9 @@ SYSTEM_PROMPT_TAIL = (
     "You may use WebSearch and WebFetch to look up current info (weather, news, today/now questions, recent events, anything you do not know). Be quick — search only when needed, then answer briefly. Do not mention the search itself. "
     "If WebFetch fails, refuses, or returns nothing useful for a given URL, call the fetch_page tool (mcp__fetch__fetch_page) with that URL — it routes through a residential proxy and reaches sites that block our server IP (German news, reddit, obituaries, etc.). Always try fetch_page before claiming you cannot read a URL. Do not mention which tool you used. "
     "If the user shares an image URL (or asks about one), call the view_image tool with that URL, then use the Read tool on the returned local path to actually look at the image, then describe or answer briefly. Do not mention the tool calls. "
-    "If the user shares a YouTube URL (youtube.com or youtu.be), call the fetch_transcript tool with that URL. It returns either the spoken transcript or, for videos without captions, a Gemini-based visual description of what happens in the video — in both cases, summarize or answer briefly from whatever it returns. Always call the tool; do not assume captionless videos are unwatchable. Only treat it as unavailable if the response literally starts with 'error:'. Do not mention the tool calls."
+    "If the user shares a YouTube URL (youtube.com or youtu.be), call the fetch_transcript tool with that URL. It returns either the spoken transcript or, for videos without captions, a Gemini-based visual description of what happens in the video — in both cases, summarize or answer briefly from whatever it returns. Always call the tool; do not assume captionless videos are unwatchable. Only treat it as unavailable if the response literally starts with 'error:'. Do not mention the tool calls. "
+    "If the user asks to download, host, save, upload, or mirror a YouTube video (e.g. 'download this', 'host it on img.example.net', 'save this video', 'put it on the image host'), call the download_youtube_video tool with the URL. It downloads the video and uploads it to img.example.net. Include the 'Hosted:' URL from the tool result in your reply."
+    "If the user shares a Reddit link (reddit.com, redd.it, v.redd.it, or redgifs) and wants the video watched, analyzed, summarized, or saved, call the analyze_reddit_video tool with that URL. It downloads the clip and returns a description of what happens in it. Set upload_to_host=true ONLY if the user explicitly asks to host, upload, or save the video — then include the returned 'Hosted:' img.example.net URL in your reply. Otherwise leave upload_to_host false. Only treat it as unavailable if the response starts with 'error:'. Do not mention the tool calls."
 )
 
 
@@ -158,34 +160,42 @@ def smart_truncate(text: str, limit: int) -> str:
     return cut + "…"
 
 
-def wrap_line(line: str, max_chars: int) -> list:
-    """Greedily word-wrap one line into chunks of at most max_chars chars.
-    A single token longer than max_chars is hard-split."""
-    line = line.strip()
-    if not line:
+def pack_balanced(text: str, hard_cap: int) -> list:
+    """Pack text into the FEWEST IRC messages whose lengths come out as even
+    as possible, each at most hard_cap chars. The model's own line breaks are
+    collapsed; a token longer than hard_cap is hard-split. Choosing the minimum
+    message count and *then* splitting evenly avoids the greedy 'first message
+    crammed to the cap, the rest half-empty' look — every message lands at
+    roughly the same length (e.g. 825 chars -> [413, 412], not [380, 221, 224])."""
+    words = []
+    for w in text.split():
+        while len(w) > hard_cap:
+            words.append(w[:hard_cap])
+            w = w[hard_cap:]
+        if w:
+            words.append(w)
+    if not words:
         return []
-    if len(line) <= max_chars:
-        return [line]
-    chunks, cur = [], ""
-    for word in line.split(" "):
-        while len(word) > max_chars:
-            if cur:
+    total = sum(len(w) for w in words) + len(words) - 1
+    n = max(1, -(-total // hard_cap))  # fewest messages that fit under the cap
+    while True:
+        target = total / n
+        chunks, cur = [], ""
+        for w in words:
+            if not cur:
+                cur = w
+            elif len(cur) + 1 + len(w) <= hard_cap and (
+                    len(chunks) == n - 1
+                    or len(cur) + 1 + len(w) <= target):
+                cur += " " + w
+            else:
                 chunks.append(cur)
-                cur = ""
-            chunks.append(word[:max_chars])
-            word = word[max_chars:]
-        if not word:
-            continue
-        if not cur:
-            cur = word
-        elif len(cur) + 1 + len(word) <= max_chars:
-            cur += " " + word
-        else:
+                cur = w
+        if cur:
             chunks.append(cur)
-            cur = word
-    if cur:
-        chunks.append(cur)
-    return chunks
+        if len(chunks) <= n:
+            return chunks
+        n = len(chunks)  # even split overflowed the cap; allow more and retry
 
 
 def sanitize_lines(text: str, max_lines: int, max_chars: int = MAX_CHARS) -> list:
@@ -200,12 +210,11 @@ def sanitize_lines(text: str, max_lines: int, max_chars: int = MAX_CHARS) -> lis
         return []
     if max_lines == 1:
         return [smart_truncate(" ".join(kept), max_chars)]
-    # Word-wrap the model's lines across the available budget instead of
-    # truncating a single long line; only the final line is ellipsized, and
-    # only when the content genuinely overflows all max_lines.
-    pieces = []
-    for line in kept:
-        pieces.extend(wrap_line(line, max_chars))
+    # Re-flow the model's prose: collapse its own (often short) line breaks and
+    # repack into the FEWEST, evenly-sized messages (see pack_balanced) so we
+    # never get one full message trailed by half-empty ones. Only the final
+    # line is ellipsized, and only when content overflows all max_lines.
+    pieces = pack_balanced(" ".join(kept), max_chars)
     if len(pieces) <= max_lines:
         return pieces
     head = pieces[:max_lines - 1]
@@ -310,7 +319,10 @@ class Claude(callbacks.Plugin):
         self._ctx = _ContextStore(CONTEXT_TTL_SEC, CONTEXT_MAX_TURNS)
 
     def _switch_mode(self, irc, msg, new_mode: str, label: str):
-        if not ircdb.channels.getChannel(msg.channel).capabilities.check('ai'):
+        try:
+            if not ircdb.channels.getChannel(msg.channel).capabilities.check('ai'):
+                return
+        except KeyError:
             return
         try:
             u = ircdb.users.getUser(msg.prefix)
@@ -387,7 +399,10 @@ class Claude(callbacks.Plugin):
                 return
             question = candidate
 
-        if not ircdb.channels.getChannel(target).capabilities.check('ai'):
+        try:
+            if not ircdb.channels.getChannel(target).capabilities.check('ai'):
+                return
+        except KeyError:
             return
         cap = ircdb.makeChannelCapability(target, CAPABILITY)
         try:
@@ -569,6 +584,13 @@ class Claude(callbacks.Plugin):
         gemini_key = os.environ.get("GEMINI_API_KEY")
         if gemini_key:
             env["GEMINI_API_KEY"] = gemini_key
+        # Pass Zipline credentials through so the reddit MCP tool can re-host
+        # downloaded videos on img.example.net.
+        for _zk in ("ZIPLINE_TOKEN", "ZIPLINE_UPLOAD_URL", "ZIPLINE_HOST",
+                    "ZIPLINE_PUBLIC_BASE"):
+            _zv = os.environ.get(_zk)
+            if _zv:
+                env[_zk] = _zv
         if mode == 'opus':
             env["MAX_THINKING_TOKENS"] = str(SMART_THINKING_TOKENS)
         cmd = [
@@ -576,8 +598,8 @@ class Claude(callbacks.Plugin):
             "-p",
             "--model", model,
             "--mcp-config", MCP_CONFIG,
-            "--tools", "WebSearch,WebFetch,Read,mcp__imageview__view_image,mcp__youtube__fetch_transcript,mcp__fetch__fetch_page",
-            "--allowedTools", "WebSearch WebFetch Read mcp__imageview__view_image mcp__youtube__fetch_transcript mcp__fetch__fetch_page",
+            "--tools", "WebSearch,WebFetch,Read,mcp__imageview__view_image,mcp__youtube__fetch_transcript,mcp__youtube__download_youtube_video,mcp__fetch__fetch_page,mcp__reddit__analyze_reddit_video",
+            "--allowedTools", "WebSearch WebFetch Read mcp__imageview__view_image mcp__youtube__fetch_transcript mcp__youtube__download_youtube_video mcp__fetch__fetch_page mcp__reddit__analyze_reddit_video",
             "--no-session-persistence",
             "--disable-slash-commands",
             "--append-system-prompt", system_prompt,

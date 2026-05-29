@@ -21,8 +21,8 @@ from supybot.commands import wrap, optional
 
 CLAUDE_BIN = "/home/botuser/.local/bin/claude"
 CLAUDE_CONFIG_DIR = "/home/botuser/runbot/.claude"
-MODEL_NORMAL = "claude-haiku-4-5-20251001"
-MODEL_SMART = "claude-opus-4-7"
+MODEL_NORMAL = "claude-opus-4-8"
+MODEL_SMART = "claude-opus-4-8"
 GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_ENDPOINT = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -31,7 +31,7 @@ GEMINI_ENDPOINT = (
 TIMEOUT_SEC = 120
 GEMINI_TIMEOUT_SEC = 60
 MAX_LINES = 6
-MAX_CHARS = 380
+MAX_CHARS = 420
 
 CAPS = {"normal": "ashnormal", "smart": "ashsmart", "gem": "ashgem"}
 
@@ -94,34 +94,42 @@ def _check_cap(irc, msg, cap_name):
     return True
 
 
-def _wrap_line(line, max_chars):
-    """Greedily word-wrap one line into chunks of at most max_chars chars.
-    A single token longer than max_chars is hard-split."""
-    line = line.strip()
-    if not line:
+def _pack_balanced(text, hard_cap):
+    """Pack text into the FEWEST messages whose lengths come out as even as
+    possible, each at most hard_cap chars. Collapses the model's own line
+    breaks; hard-splits a token longer than hard_cap. Picking the minimum
+    message count and then splitting evenly avoids the greedy 'first message
+    crammed full, rest half-empty' look (825 chars -> [413, 412], not
+    [380, 221, 224])."""
+    words = []
+    for w in text.split():
+        while len(w) > hard_cap:
+            words.append(w[:hard_cap])
+            w = w[hard_cap:]
+        if w:
+            words.append(w)
+    if not words:
         return []
-    if len(line) <= max_chars:
-        return [line]
-    chunks, cur = [], ""
-    for word in line.split(" "):
-        while len(word) > max_chars:
-            if cur:
+    total = sum(len(w) for w in words) + len(words) - 1
+    n = max(1, -(-total // hard_cap))
+    while True:
+        target = total / n
+        chunks, cur = [], ""
+        for w in words:
+            if not cur:
+                cur = w
+            elif len(cur) + 1 + len(w) <= hard_cap and (
+                    len(chunks) == n - 1
+                    or len(cur) + 1 + len(w) <= target):
+                cur += " " + w
+            else:
                 chunks.append(cur)
-                cur = ""
-            chunks.append(word[:max_chars])
-            word = word[max_chars:]
-        if not word:
-            continue
-        if not cur:
-            cur = word
-        elif len(cur) + 1 + len(word) <= max_chars:
-            cur += " " + word
-        else:
+                cur = w
+        if cur:
             chunks.append(cur)
-            cur = word
-    if cur:
-        chunks.append(cur)
-    return chunks
+        if len(chunks) <= n:
+            return chunks
+        n = len(chunks)
 
 
 def _sanitize_lines(text):
@@ -136,11 +144,11 @@ def _sanitize_lines(text):
             cleaned.append(s)
     if not cleaned:
         return []
-    # Word-wrap across the line budget instead of truncating a single long
-    # line; only the last line is ellipsized, and only on real overflow.
-    pieces = []
-    for s in cleaned:
-        pieces.extend(_wrap_line(s, MAX_CHARS))
+    # Re-flow Ash's prose: collapse his own line breaks and repack into the
+    # FEWEST, evenly-sized messages (see _pack_balanced) so we never get one
+    # full message trailed by half-empty ones. Only the last line is
+    # ellipsized, and only on real overflow past MAX_LINES.
+    pieces = _pack_balanced(" ".join(cleaned), MAX_CHARS)
     if len(pieces) <= MAX_LINES:
         return pieces
     head = pieces[: MAX_LINES - 1]

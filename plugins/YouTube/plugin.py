@@ -2,21 +2,34 @@
 # YouTube plugin: snarfer that posts video metadata via yt-dlp and a
 # shrunk URL via the ShrinkUrl plugin.
 #
+# Also provides !ytdl <url> to download a YouTube video and host it on
+# Zipline (img.example.net). Requires ZIPLINE_TOKEN / ZIPLINE_UPLOAD_URL /
+# ZIPLINE_PUBLIC_BASE env vars (same as Create plugin).
+#
 # Designed to coexist with ShrinkUrl by handling both messages itself.
 # Configure ShrinkUrl.nonSnarfingRegexp to skip YouTube URLs so the
 # shrunk-URL line only fires once and in the right order.
 ###
 
+import os
 import re
 import json
+import uuid
+import glob
+import shutil
+import tempfile
 import subprocess
 import threading
+import urllib.request
+import urllib.error
 
 import supybot.conf as conf
+import supybot.ircdb as ircdb
 import supybot.utils as utils
 import supybot.ircmsgs as ircmsgs
 import supybot.ircutils as ircutils
 import supybot.callbacks as callbacks
+from supybot.commands import wrap
 from supybot.i18n import PluginInternationalization
 _ = PluginInternationalization('YouTube')
 
@@ -35,6 +48,14 @@ YOUTUBE_RE = re.compile(
 )
 
 YT_DLP = '/usr/bin/yt-dlp'
+
+# mIRC color 12 = royal blue (readable on dark and light themes)
+_BLUE = '\x0312'
+_RESET = '\x03'
+
+
+def _blue_link(url):
+    return '%s%s%s' % (_BLUE, url, _RESET)
 
 
 def _human_views(n):
@@ -81,8 +102,17 @@ def _hashtagify(tag):
     return ('#' + h) if h else None
 
 
+def _human_bytes(n):
+    for unit, divisor in (('GB', 1024 ** 3), ('MB', 1024 ** 2), ('KB', 1024)):
+        if n >= divisor:
+            v = n / divisor
+            s = ('%.1f' % v).rstrip('0').rstrip('.')
+            return s + unit
+    return '%dB' % n
+
+
 class YouTube(callbacks.PluginRegexp):
-    """Snarfer for YouTube video URLs."""
+    """Snarfer for YouTube video URLs, and !ytdl to download+host videos."""
 
     regexps = ['youtubeSnarfer']
     flags = re.IGNORECASE
@@ -90,6 +120,10 @@ class YouTube(callbacks.PluginRegexp):
     def __init__(self, irc):
         self.__parent = super(YouTube, self)
         self.__parent.__init__(irc)
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers                                                     #
+    # ------------------------------------------------------------------ #
 
     def _fetchInfo(self, url, timeout, cookies):
         cmd = [YT_DLP, '--skip-download', '--no-playlist',
@@ -251,6 +285,205 @@ class YouTube(callbacks.PluginRegexp):
         except Exception:
             self.log.exception('YouTube: unhandled error in _handle')
 
+    # ------------------------------------------------------------------ #
+    # !ytdl helpers                                                        #
+    # ------------------------------------------------------------------ #
+
+    def _check_ytdl_cap(self, irc, msg):
+        if not msg.channel:
+            irc.error("channel-only")
+            return False
+        chan_cap = ircdb.makeChannelCapability(msg.channel, 'ytdl')
+        if not ircdb.checkCapability(msg.prefix, chan_cap):
+            irc.errorNoCapability(chan_cap)
+            return False
+        return True
+
+    @staticmethod
+    def _ext_for_mime(mime):
+        table = {
+            'video/mp4': 'mp4', 'video/webm': 'webm',
+            'video/quicktime': 'mov', 'video/x-matroska': 'mkv',
+        }
+        return table.get((mime or '').lower().split(';')[0].strip(), 'mp4')
+
+    def _zipline_upload_file(self, path, mime, timeout):
+        """Upload a local file to Zipline. Returns the public URL."""
+        token = os.environ.get('ZIPLINE_TOKEN')
+        endpoint = os.environ.get('ZIPLINE_UPLOAD_URL')
+        if not token or not endpoint:
+            raise RuntimeError('ZIPLINE_TOKEN/ZIPLINE_UPLOAD_URL not set')
+        ext = self._ext_for_mime(mime)
+        with open(path, 'rb') as fh:
+            raw = fh.read()
+        boundary = '----fatbot' + uuid.uuid4().hex
+        fname = uuid.uuid4().hex + '.' + ext
+        head = (
+            '--' + boundary + '\r\n'
+            'Content-Disposition: form-data; name="file"; filename="%s"\r\n'
+            'Content-Type: %s\r\n\r\n' % (fname, mime or 'video/mp4')
+        ).encode('utf-8')
+        tail = ('\r\n--' + boundary + '--\r\n').encode('utf-8')
+        data = head + raw + tail
+        host = os.environ.get('ZIPLINE_HOST')
+        headers = {
+            'authorization': token,
+            'content-type': 'multipart/form-data; boundary=' + boundary,
+        }
+        if host:
+            headers['Host'] = host
+        req = urllib.request.Request(
+            endpoint, data=data, headers=headers, method='POST')
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                j = json.loads(resp.read().decode('utf-8'))
+        except urllib.error.HTTPError as e:
+            detail = ''
+            try:
+                detail = e.read().decode('utf-8', 'replace')[:200]
+            except Exception:
+                pass
+            raise RuntimeError('zipline http %d: %s' % (e.code, detail))
+        except Exception as e:
+            raise RuntimeError('zipline upload failed: %s' % e)
+        files = j.get('files') or []
+        if not files or 'url' not in files[0]:
+            raise RuntimeError(
+                'zipline: no url in response: %s' % json.dumps(j)[:200])
+        url = files[0]['url']
+        base = os.environ.get('ZIPLINE_PUBLIC_BASE')
+        if base:
+            from urllib.parse import urlsplit
+            url = base.rstrip('/') + urlsplit(url).path
+        return url
+
+    def _do_ytdl(self, irc, channel, network, url):
+        """Background worker: download URL, upload to Zipline, post link."""
+        tmpdir = tempfile.mkdtemp(prefix='fatbot-ytdl-')
+        try:
+            cookies = self.registryValue('cookiesFile', channel, network)
+            dl_timeout = self.registryValue('ytdlTimeout', channel, network)
+            max_bytes = self.registryValue('ytdlMaxBytes', channel, network)
+
+            # Build yt-dlp command — prefer mp4 so the upload plays inline
+            cmd = [
+                YT_DLP,
+                '--no-playlist', '--no-warnings', '--socket-timeout', '15',
+                '-f',
+                ('bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]'
+                 '/best[ext=mp4][height<=1080]'
+                 '/bestvideo[height<=1080]+bestaudio'
+                 '/best[height<=1080]/best'),
+                '--merge-output-format', 'mp4',
+            ]
+            if max_bytes > 0:
+                cmd += ['--max-filesize', '%d' % max_bytes]
+            if cookies:
+                cmd += ['--cookies', cookies]
+            cmd += ['-o', os.path.join(tmpdir, '%(id)s.%(ext)s'), '--', url]
+
+            self.log.info('YouTube.ytdl: running %s', ' '.join(cmd))
+            try:
+                proc = subprocess.run(
+                    cmd, capture_output=True, timeout=dl_timeout,
+                    text=True,
+                )
+            except subprocess.TimeoutExpired:
+                irc.queueMsg(ircmsgs.privmsg(channel,
+                    'ytdl: download timed out after %ds' % dl_timeout))
+                return
+            except Exception as e:
+                irc.queueMsg(ircmsgs.privmsg(channel,
+                    'ytdl: yt-dlp error: %s' % e))
+                return
+
+            if proc.returncode != 0:
+                err = (proc.stderr or '').strip().splitlines()
+                # grab the last meaningful line for the IRC error
+                msg_line = next(
+                    (l for l in reversed(err) if l.strip()), '') or 'download failed'
+                irc.queueMsg(ircmsgs.privmsg(channel,
+                    'ytdl: %s' % msg_line[:200]))
+                return
+
+            # Find downloaded file
+            files = [f for f in glob.glob(os.path.join(tmpdir, '*'))
+                     if os.path.isfile(f)]
+            if not files:
+                irc.queueMsg(ircmsgs.privmsg(channel,
+                    'ytdl: no file produced by yt-dlp'))
+                return
+            dl_path = files[0]
+            size = os.path.getsize(dl_path)
+
+            if max_bytes > 0 and size > max_bytes:
+                irc.queueMsg(ircmsgs.privmsg(channel,
+                    'ytdl: file too large (%s > %s limit)' % (
+                        _human_bytes(size), _human_bytes(max_bytes))))
+                return
+
+            # Determine MIME type from extension
+            ext = os.path.splitext(dl_path)[1].lower().lstrip('.')
+            mime_map = {
+                'mp4': 'video/mp4', 'webm': 'video/webm',
+                'mkv': 'video/x-matroska', 'mov': 'video/quicktime',
+            }
+            mime = mime_map.get(ext, 'video/mp4')
+
+            self.log.info('YouTube.ytdl: uploading %s (%s, %s)',
+                          dl_path, mime, _human_bytes(size))
+            try:
+                zip_url = self._zipline_upload_file(dl_path, mime, 120)
+            except Exception as e:
+                self.log.exception('YouTube.ytdl: upload failed')
+                irc.queueMsg(ircmsgs.privmsg(channel,
+                    'ytdl: upload failed: %s' % e))
+                return
+
+            # Shorten Zipline URL via ShrinkUrl chain
+            short = None
+            cb = irc.getCallback('ShrinkUrl')
+            if cb is not None:
+                try:
+                    short = cb._getTlyUrl(zip_url)
+                except Exception:
+                    self.log.exception('YouTube.ytdl: shrink failed')
+
+            link = _blue_link(short or zip_url)
+
+            # Fetch metadata for title/duration display (best-effort)
+            try:
+                info = self._fetchInfo(
+                    url, self.registryValue('timeout', channel, network),
+                    cookies or None)
+            except Exception:
+                info = None
+            bits = []
+            if info:
+                title = (info.get('title') or '').strip()
+                if title:
+                    bits.append(ircutils.bold(title))
+                dur = _format_duration(info)
+                if dur:
+                    bits.append(dur)
+                sz_str = _human_bytes(size)
+                bits.append(sz_str)
+            else:
+                bits.append(_human_bytes(size))
+            reply = ' • '.join(bits) + ' → ' + link
+            irc.queueMsg(ircmsgs.privmsg(channel, reply))
+
+        except Exception:
+            self.log.exception('YouTube.ytdl: unhandled error')
+            irc.queueMsg(ircmsgs.privmsg(channel,
+                'ytdl: unexpected error (see logs)'))
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    # ------------------------------------------------------------------ #
+    # Snarfer                                                              #
+    # ------------------------------------------------------------------ #
+
     def youtubeSnarfer(self, irc, msg, match):
         channel = msg.channel
         network = irc.network
@@ -269,6 +502,33 @@ class YouTube(callbacks.PluginRegexp):
             daemon=True,
         ).start()
     youtubeSnarfer.__doc__ = YOUTUBE_RE.pattern
+
+    # ------------------------------------------------------------------ #
+    # Commands                                                             #
+    # ------------------------------------------------------------------ #
+
+    def ytdl(self, irc, msg, args, url):
+        """<youtube-url>
+
+        Download a YouTube video and host it on img.example.net.
+        Requires the 'ytdl' channel capability.
+        """
+        channel = msg.channel
+        network = irc.network
+        if not self._check_ytdl_cap(irc, msg):
+            return
+        url = url.strip()
+        if not YOUTUBE_RE.search(url):
+            irc.error("that doesn't look like a YouTube video URL")
+            return
+        irc.reply('Downloading...', prefixNick=False)
+        threading.Thread(
+            target=self._do_ytdl,
+            args=(irc, channel, network, url),
+            name='YouTube-DL',
+            daemon=True,
+        ).start()
+    ytdl = wrap(ytdl, ['public', 'text'])
 
 
 Class = YouTube

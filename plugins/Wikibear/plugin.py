@@ -19,13 +19,41 @@ import json
 import supybot.conf as conf
 import supybot.ircdb as ircdb
 import supybot.utils as utils
+import supybot.ircutils as ircutils
 import supybot.callbacks as callbacks
 from supybot.commands import wrap, optional
 
-CLAUDE_BIN = "/home/botuser/.local/bin/claude"
-CLAUDE_CONFIG_DIR = "/home/botuser/runbot/.claude"
-CLAUDE_MODEL = "claude-opus-4-7"
+
+def _load_conf(path):
+    """Read KEY=value pairs from a conf file. Lines starting with # are
+    comments. Missing file silently returns {}. Reload with !reload."""
+    result = {}
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if '=' in line:
+                    k, _, v = line.partition('=')
+                    result[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return result
+
+
+_CONF = _load_conf(os.path.join(os.path.dirname(__file__), 'wikibear.conf'))
+
+CLAUDE_BIN        = _CONF.get('CLAUDE_BIN',        '/home/botuser/.local/bin/claude')
+CLAUDE_CONFIG_DIR = _CONF.get('CLAUDE_CONFIG_DIR', '/home/botuser/runbot/.claude')
+CLAUDE_MODEL      = _CONF.get('MODEL',             'claude-opus-4-8')
+BOT_HOME          = _CONF.get('HOME',              '/home/botuser')
 SIGNOFF = "I'm wikibeaaaaaaaaaaar!!"
+MAX_CHARS = 420
+MAX_LINES = 6
+# Matches the signoff in any drawl/spacing variant so it can be peeled off
+# the model output before re-flow and re-attached exactly once on its own line.
+SIGNOFF_RE = re.compile(r"(?i)\bi['’]?m\s+wiki\s*bea+r+[\s!.]*")
 
 TLY_API = "https://t.ly/api/v1/link/shorten"
 
@@ -81,9 +109,9 @@ SYSTEM_PROMPT_NOARG = (
     f"The closing line '{SIGNOFF}' is MANDATORY and must always appear "
     "as the final line on its own; if you run out of room, use a 6th "
     "message just for the signoff. Each message under 380 chars. "
-    "Separate IRC messages with a single blank line. Never include URLs "
-    "or links of any kind. No preamble, no quotes, no meta, no "
-    "warnings, no markdown."
+    "Separate IRC messages with a single blank line. Never include URLs, "
+    "links, citations, or source lists of any kind. No preamble, no "
+    "quotes, no meta, no warnings, no markdown."
 )
 
 SYSTEM_PROMPT_QUESTION = (
@@ -104,20 +132,24 @@ SYSTEM_PROMPT_QUESTION = (
     f"The closing line '{SIGNOFF}' is MANDATORY and must always appear "
     "as the final line on its own; if you run out of room, use a 6th "
     "message just for the signoff. Each message under 380 chars. "
-    "Separate IRC messages with a single blank line. Never include URLs "
-    "or links of any kind. No preamble, no quotes, no meta, no "
-    "warnings, no markdown."
+    "Separate IRC messages with a single blank line. Never include URLs, "
+    "links, citations, or source lists of any kind. No preamble, no "
+    "quotes, no meta, no warnings, no markdown."
 )
 
 
 def _shorten_url(url: str, timeout: int = 6) -> str:
-    """Shorten a single URL via t.ly. Falls back to original."""
-    if not url or len(url) < 30:
+    """Shorten a single URL via t.ly, then color it blue (mIRC color 12) so it
+    stands out as a clickable link. Short URLs and shorten failures are colored
+    too, so every link we emit is blue -- not just t.ly ones."""
+    if not url:
         return url
+    if len(url) < 30:
+        return ircutils.mircColor(url, '12')
     try:
         token = conf.supybot.plugins.ShrinkUrl.tlyAccessToken()
         if not token:
-            return url
+            return ircutils.mircColor(url, '12')
         headers = {
             'Authorization': 'Bearer ' + token,
             'Content-Type': 'application/json',
@@ -128,10 +160,10 @@ def _shorten_url(url: str, timeout: int = 6) -> str:
         result = json.loads(text)
         short = result.get('short_url')
         if short and short.startswith('http'):
-            return short
+            return ircutils.mircColor(short, '12')
     except Exception:
         pass
-    return url
+    return ircutils.mircColor(url, '12')
 
 
 _URL_RE = re.compile(r"https?://[^\s)>\]]+")
@@ -142,6 +174,45 @@ def _shorten_inline(line: str) -> str:
     def sub(m):
         return _shorten_url(m.group(0))
     return _URL_RE.sub(sub, line)
+
+
+def _pack_balanced(text: str, hard_cap: int) -> list:
+    """Pack text into the FEWEST messages whose lengths come out as even as
+    possible, each at most hard_cap chars. Collapses the model's own line
+    breaks (incl. blank-line paragraph breaks); hard-splits a token longer than
+    hard_cap. Choosing the minimum message count and then splitting evenly
+    avoids the greedy 'first message crammed full, rest half-empty' look
+    (825 chars -> [413, 412], not [380, 221, 224]). The signoff is appended by
+    the caller, so it never reaches here."""
+    words = []
+    for w in text.split():
+        while len(w) > hard_cap:
+            words.append(w[:hard_cap])
+            w = w[hard_cap:]
+        if w:
+            words.append(w)
+    if not words:
+        return []
+    total = sum(len(w) for w in words) + len(words) - 1
+    n = max(1, -(-total // hard_cap))
+    while True:
+        target = total / n
+        chunks, cur = [], ""
+        for w in words:
+            if not cur:
+                cur = w
+            elif len(cur) + 1 + len(w) <= hard_cap and (
+                    len(chunks) == n - 1
+                    or len(cur) + 1 + len(w) <= target):
+                cur += " " + w
+            else:
+                chunks.append(cur)
+                cur = w
+        if cur:
+            chunks.append(cur)
+        if len(chunks) <= n:
+            return chunks
+        n = len(chunks)
 
 
 class Wikibear(callbacks.Plugin):
@@ -155,9 +226,11 @@ class Wikibear(callbacks.Plugin):
         if not msg.channel:
             irc.error("channel-only")
             return
-        chan_cap = ircdb.makeChannelCapability(msg.channel, "wikibear")
-        if not ircdb.checkCapability(msg.prefix, chan_cap):
-            irc.errorNoCapability(chan_cap)
+        try:
+            chan_enabled = ircdb.channels.getChannel(msg.channel).capabilities.check('wikibear')
+        except KeyError:
+            chan_enabled = None
+        if not chan_enabled:
             return
         timeout = self.registryValue("timeoutSec")
 
@@ -169,11 +242,11 @@ class Wikibear(callbacks.Plugin):
             stdin_payload = "go"
 
         env = {
-            "HOME": "/home/botuser",
-            "PATH": "/home/botuser/.local/bin:/usr/bin:/bin",
+            "HOME": BOT_HOME,
+            "PATH": os.path.join(BOT_HOME, ".local/bin") + ":/usr/bin:/bin",
             "CLAUDE_CONFIG_DIR": CLAUDE_CONFIG_DIR,
-            "XDG_CACHE_HOME": "/home/botuser/runbot/.cache",
-            "XDG_CONFIG_HOME": "/home/botuser/runbot/.config",
+            "XDG_CACHE_HOME": os.path.join(BOT_HOME, "runbot/.cache"),
+            "XDG_CONFIG_HOME": os.path.join(BOT_HOME, "runbot/.config"),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
         }
         cmd = [
@@ -214,25 +287,16 @@ class Wikibear(callbacks.Plugin):
             irc.reply("(no reply)")
             return
 
-        # Split into IRC messages on blank lines. Cap at 6 (signoff may
-        # need its own message). Within each message keep newlines so
-        # multi-line content stays together.
-        chunks = [c.strip() for c in re.split(r"\n\s*\n", out) if c.strip()]
-        chunks = chunks[:6]
-        emitted_lines = []
-        for chunk in chunks:
-            for line in chunk.split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                line = _URL_RE.sub("", line).strip()
-                if not line:
-                    continue
-                irc.reply(line, prefixNick=False)
-                emitted_lines.append(line)
-        # Guarantee the signoff is present, even as a 4th/standalone msg.
-        if not any(SIGNOFF in l for l in emitted_lines):
-            irc.reply(SIGNOFF, prefixNick=False)
+        # Strip URLs and the signoff, then re-flow the prose: collapse the
+        # model's own line/paragraph breaks and repack into the FEWEST,
+        # evenly-sized messages (see _pack_balanced) so they're all full like
+        # the weather output — never one full message trailed by half-empty
+        # ones. The signoff always rides on its own final line; reserve a slot.
+        body = SIGNOFF_RE.sub(" ", _URL_RE.sub("", out))
+        msgs = _pack_balanced(body, MAX_CHARS)[:MAX_LINES - 1]
+        for m in msgs:
+            irc.reply(m, prefixNick=False)
+        irc.reply(SIGNOFF, prefixNick=False)
 
     wikibear = wrap(wikibear, ["public", optional("text")])
 

@@ -13,6 +13,7 @@ Returns plain text with timestamps and rolling-subtitle duplicates
 stripped. Host-whitelisted to youtube.com / youtu.be.
 """
 
+import glob
 import hashlib
 import json
 import os
@@ -23,6 +24,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 os.chdir(tempfile.gettempdir())
 
@@ -296,6 +298,132 @@ def fetch_transcript(url: str) -> str:
         except OSError:
             pass
         return text
+
+
+_COOKIES_YT = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "youtube-cookies.txt",
+)
+_DL_TIMEOUT = 600.0
+
+
+def _zipline_upload_video(path):
+    """Upload a video to Zipline via curl (streaming — no full file in RAM)."""
+    token = os.environ.get("ZIPLINE_TOKEN")
+    endpoint = os.environ.get("ZIPLINE_UPLOAD_URL")
+    host = os.environ.get("ZIPLINE_HOST")
+    if not token or not endpoint:
+        raise RuntimeError("ZIPLINE_TOKEN/ZIPLINE_UPLOAD_URL not set")
+    ext = os.path.splitext(path)[1].lower().lstrip(".") or "mp4"
+    mime_map = {"mp4": "video/mp4", "webm": "video/webm", "mkv": "video/x-matroska"}
+    mime = mime_map.get(ext, "video/mp4")
+    fname = uuid.uuid4().hex + "." + ext
+    cmd = [
+        "curl", "-s", "-X", "POST",
+        "-H", "authorization: " + token,
+        "-F", "file=@%s;filename=%s;type=%s" % (path, fname, mime),
+    ]
+    if host:
+        cmd += ["-H", "Host: " + host]
+    cmd.append(endpoint)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("zipline upload timed out")
+    except Exception as e:
+        raise RuntimeError("zipline upload failed: %s" % e)
+    if r.returncode != 0:
+        raise RuntimeError("curl exit %d: %s" % (r.returncode, r.stderr[:200]))
+    try:
+        j = json.loads(r.stdout)
+    except ValueError:
+        raise RuntimeError("zipline bad response: %s" % r.stdout[:200])
+    files = j.get("files") or []
+    if not files or "url" not in files[0]:
+        raise RuntimeError("no url in zipline response: %s" % r.stdout[:200])
+    url = files[0]["url"]
+    base = os.environ.get("ZIPLINE_PUBLIC_BASE")
+    if base:
+        url = base.rstrip("/") + urllib.parse.urlsplit(url).path
+    return url
+
+
+@mcp.tool()
+def download_youtube_video(url: str) -> str:
+    """Download a YouTube video and host it on img.example.net.
+
+    Downloads using yt-dlp (best mp4 up to 1080p), uploads to Zipline,
+    and returns the public img.example.net URL plus title and file size.
+
+    Call this when the user asks to download, host, save, upload, or
+    mirror a YouTube video. Returns 'Hosted: <url>' on success, or a
+    string starting with 'error:' on failure.
+    """
+    if not _host_ok(url):
+        return "error: only youtube.com / youtu.be URLs are accepted"
+
+    with tempfile.TemporaryDirectory(prefix="yt-dl-") as work:
+        cmd = [
+            _YTDLP,
+            "--no-playlist", "--no-warnings", "--socket-timeout", "15",
+            "--proxy", _PROXY,
+            "-f", "bestvideo+bestaudio/best",
+            "--merge-output-format", "mp4",
+            "--write-info-json",
+        ]
+        cmd += ["-o", os.path.join(work, "%(id)s.%(ext)s"), "--", url]
+
+        try:
+            r = subprocess.run(
+                cmd, capture_output=True, text=True,
+                timeout=_DL_TIMEOUT, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return "error: download timed out"
+        except FileNotFoundError:
+            return "error: yt-dlp not installed"
+
+        title = ""
+        media = None
+        for name in sorted(os.listdir(work)):
+            full = os.path.join(work, name)
+            if name.endswith(".info.json"):
+                try:
+                    with open(full, "r", encoding="utf-8") as f:
+                        title = (json.load(f).get("title") or "").strip()
+                except (OSError, json.JSONDecodeError):
+                    pass
+                continue
+            if name.endswith(".part") or name.endswith(".ytdl"):
+                continue
+            media = full
+
+        if not media or not os.path.getsize(media):
+            stderr = (r.stderr or "").strip().splitlines()
+            hint = next((l for l in reversed(stderr) if l.strip()), "download failed")
+            return "error: %s" % hint[:200]
+
+        size = os.path.getsize(media)
+        size_str = ""
+        for unit, div in (("GB", 1024**3), ("MB", 1024**2), ("KB", 1024)):
+            if size >= div:
+                size_str = "%.1f%s" % (size / div, unit)
+                break
+        if not size_str:
+            size_str = "%dB" % size
+
+        try:
+            hosted = _zipline_upload_video(media)
+        except RuntimeError as e:
+            return "error: upload failed: %s" % e
+
+    parts = []
+    if title:
+        parts.append("[%s]" % title)
+    if size_str:
+        parts.append(size_str)
+    parts.append("Hosted: %s" % hosted)
+    return "\n".join(parts)
 
 
 if __name__ == "__main__":

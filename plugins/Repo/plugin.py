@@ -1,4 +1,5 @@
 import supybot.callbacks as callbacks
+import supybot.ircutils as ircutils
 from supybot.commands import wrap
 
 REPO_URL = "https://github.com/patryksg/fatbot/tree/master"
@@ -15,7 +16,7 @@ class Repo(callbacks.Plugin):
 
         Reply with the GitHub repo URL for fatbot.
         """
-        irc.reply(REPO_URL)
+        irc.reply(ircutils.mircColor(REPO_URL, '12'))
     repo = wrap(repo)
 
     def howto(self, irc, msg, args):
@@ -23,7 +24,7 @@ class Repo(callbacks.Plugin):
 
         Reply with the link to the setup guide (Debian Trixie from scratch).
         """
-        irc.reply("Setup guide (Debian Trixie from scratch): " + INSTALL_URL)
+        irc.reply("Setup guide (Debian Trixie from scratch): " + ircutils.mircColor(INSTALL_URL, '12'))
     howto = wrap(howto)
 
 

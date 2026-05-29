@@ -396,17 +396,20 @@ class EasyControl(callbacks.Plugin):
         """[<#channel>] <capability>
 
         Disable feature <capability> on <channel> by removing it from the
-        channel's capabilities. Defaults to the current channel.
+        channel's capabilities. Removes both the positive and negative forms
+        so the capability is fully cleared. Defaults to the current channel.
         """
         if not self._check_owner(irc, msg):
             return
+        bare = capability.lstrip('-')
         chan = ircdb.channels.getChannel(channel)
-        try:
-            chan.removeCapability(capability)
-        except KeyError:
-            pass
+        for cap in (bare, '-' + bare):
+            try:
+                chan.removeCapability(cap)
+            except KeyError:
+                pass
         ircdb.channels.setChannel(channel, chan)
-        irc.reply("Disabled '" + capability + "' on " + channel + ".")
+        irc.reply("Disabled '" + bare + "' on " + channel + ".")
     unchancap = wrap(unchancap, ["channel", "somethingWithoutSpaces"])
 
 

@@ -64,4 +64,13 @@ conf.registerChannelValue(YouTube, 'shrinkShowDomain',
     registry.Boolean(False, _("""Whether to append " (at <domain>)" to the
     shrunk URL line, like ShrinkUrl's own snarfer does.""")))
 
+conf.registerChannelValue(YouTube, 'ytdlTimeout',
+    registry.PositiveInteger(300, _("""Timeout (seconds) for the yt-dlp
+    download subprocess used by !ytdl.""")))
+
+conf.registerGlobalValue(YouTube, 'ytdlMaxBytes',
+    registry.NonNegativeInteger(0, _("""Maximum file size in bytes for
+    !ytdl downloads. 0 = no limit (default). yt-dlp will also refuse
+    per-stream downloads exceeding a non-zero value.""")))
+
 # vim:set shiftwidth=4 softtabstop=4 expandtab textwidth=79:

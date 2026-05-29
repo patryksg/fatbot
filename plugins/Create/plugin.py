@@ -47,7 +47,7 @@ SEED_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 DEFAULT_MOTION_PROMPT = "natural subtle motion, gentle ambient movement"
 CLAUDE_BIN = "/home/botuser/.local/bin/claude"
 CLAUDE_CONFIG_DIR = "/home/botuser/runbot/.claude"
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"
+CLAUDE_MODEL = "claude-opus-4-8"
 CLAUDE_TIMEOUT = 30
 
 ATLAS_LLM_ENDPOINT = "https://api.atlascloud.ai/v1/chat/completions"
@@ -585,10 +585,11 @@ class Create(callbacks.Plugin):
 
     def _shorten(self, url):
         # Our own Zipline URLs are already short and clean (no trailing
-        # punctuation that IRC auto-linkers mangle) — never shorten them.
+        # punctuation that IRC auto-linkers mangle) — never shorten them, but
+        # still color them blue like every other link we post.
         base = os.environ.get("ZIPLINE_PUBLIC_BASE") or ""
         if base and url.startswith(base):
-            return url
+            return ircutils.mircColor(url, '12')
         try:
             for irc in world.ircs:
                 shrink = irc.getCallback("ShrinkUrl")
@@ -602,7 +603,7 @@ class Create(callbacks.Plugin):
                             pass
         except Exception:
             pass
-        return url
+        return ircutils.mircColor(url, '12')
 
     def _clean_suffix(self, raw):
         suffix = (raw or "").strip().strip('"').strip("'").rstrip(".")
@@ -619,7 +620,6 @@ class Create(callbacks.Plugin):
             "CLAUDE_CONFIG_DIR": CLAUDE_CONFIG_DIR,
             "XDG_CACHE_HOME": "/home/botuser/runbot/.cache",
             "XDG_CONFIG_HOME": "/home/botuser/runbot/.config",
-            "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", ""),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
         }
         cmd = [
@@ -996,7 +996,6 @@ class Create(callbacks.Plugin):
             "CLAUDE_CONFIG_DIR": CLAUDE_CONFIG_DIR,
             "XDG_CACHE_HOME": "/home/botuser/runbot/.cache",
             "XDG_CONFIG_HOME": "/home/botuser/runbot/.config",
-            "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", ""),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
         }
         cmd = [

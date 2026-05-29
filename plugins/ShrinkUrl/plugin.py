@@ -323,19 +323,30 @@ class ShrinkUrl(callbacks.PluginRegexp):
             self.db.set('tly', url, link)
             return link
 
+    @staticmethod
+    def _blueLink(url):
+        """Render a short link in blue (mIRC color 12) so it stands out as a
+        clickable link in channel -- every link, not just t.ly ones.
+        Idempotent: a string that already carries a color code is returned
+        unchanged, so it's safe to wrap more than once."""
+        if url and '\x03' not in url:
+            return ircutils.mircColor(url, '12')
+        return url
+
     def _getTlyUrl(self, url):
         """Primary shortener chain: t.ly -> tinyurl -> x0.no. Each provider has
         its own @retry; we fall through silently so a short URL is still
-        produced as long as one provider is up."""
+        produced as long as one provider is up. Every result is colored blue
+        (mIRC color 12) to signify a link, no matter which provider wins."""
         try:
-            return self._tlyOnly(url)
+            return self._blueLink(self._tlyOnly(url))
         except Exception:
             log.info('ShrinkUrl: t.ly failed, falling back to tinyurl')
         try:
-            return self._getTinyUrl(url)
+            return self._blueLink(self._getTinyUrl(url))
         except Exception:
             log.info('ShrinkUrl: tinyurl failed, falling back to x0.no')
-        return self._getX0Url(url)
+        return self._blueLink(self._getX0Url(url))
 
     @internationalizeDocstring
     def tly(self, irc, msg, args, url):
