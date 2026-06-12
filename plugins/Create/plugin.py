@@ -42,12 +42,18 @@ ATLAS_ENDPOINT = "https://api.atlascloud.ai/api/v1/model/generateVideo"
 ATLAS_POLL_BASE = "https://api.atlascloud.ai/api/v1/model/prediction/"
 ATLAS_I2V_MODEL = "atlascloud/wan-2.2-turbo-spicy/image-to-video"
 ATLAS_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+# FLUX1.1 [pro] Ultra (4MP) takes neither steps nor CFGScale and wants ~4MP dims.
+FLUX_ULTRA_MODEL = "bfl:2@2"
+# Fallbacks if the videoModel/videoNsfwModel config keys aren't registered yet
+# (e.g. a !reload that didn't re-run config registration) — keeps !video alive.
+VIDEO_MODEL_DEFAULT = "bytedance/seedance-2.0/image-to-video"
+VIDEO_NSFW_MODEL_DEFAULT = ATLAS_I2V_MODEL
 
 SEED_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 DEFAULT_MOTION_PROMPT = "natural subtle motion, gentle ambient movement"
 CLAUDE_BIN = "/home/botuser/.local/bin/claude"
 CLAUDE_CONFIG_DIR = "/home/botuser/runbot/.claude"
-CLAUDE_MODEL = "claude-opus-4-8"
+CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 CLAUDE_TIMEOUT = 30
 
 ATLAS_LLM_ENDPOINT = "https://api.atlascloud.ai/v1/chat/completions"
@@ -120,17 +126,6 @@ SFW_RETRY_HINT = (
 # edit doesn't drift the composition/background or multiply the subjects (see
 # _edit_pic_nsfw). Kept SHORT: SDXL's CLIP only reads ~77 tokens, so a long
 # caption would push the nudity terms out of the effective window.
-GEMINI_CAPTION_MODEL = "gemini-2.5-flash"
-GEMINI_CAPTION_ENDPOINT = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    + GEMINI_CAPTION_MODEL + ":generateContent"
-)
-CAPTION_PROMPT = (
-    "Describe this photo for an image generator in ONE concise sentence, max 30 "
-    "words: number of people and body type, their pose, the setting, the single "
-    "most distinctive background feature, and the lighting. Do not mention "
-    "clothing. Output only the description."
-)
 # img2img negatives. BASE stops the seed from exploding into a crowd (the classic
 # failure mode); CLOTHING is added for undress requests so the garment is removed
 # at a lower, higher-fidelity strength.
@@ -141,7 +136,11 @@ EDIT_NEG_BASE = (
 )
 EDIT_NEG_CLOTHING = (
     "bikini, swimsuit, swimwear, clothing, clothes, lingerie, bra, underwear, "
-    "top, dress, shirt"
+    "top, dress, shirt, t-shirt, waistcoat, vest, suit, jacket, coat, blazer, "
+    "hoodie, hooded top, hood, sweater, sweatshirt, pullover, cardigan, "
+    "suspenders, braces, tie, pants, trousers, shorts, robe, uniform, "
+    "sleeves, draped cloth, fabric on body, partially dressed, half undressed, "
+    "fully clothed, dressed"
 )
 NUDE_HINT_WORDS = (
     "naked", "nude", "nudity", "topless", "bare skin", "bare breast", "bare chest",
@@ -175,11 +174,6 @@ ANALYZE_PROMPT = (
     '"strength": number 0.45-0.65, lower for a single clear subject, higher if '
     "more of the frame must change. Output only the JSON object."
 )
-
-# Provenance: ids of images the bot generated itself (synthetic subjects). The
-# undress edit path is gated to these so it can never run on an arbitrary
-# uploaded photo of a real person.
-PROVENANCE_MAX = 1000
 
 
 def _ip_is_safe(ip):
@@ -225,7 +219,6 @@ class Create(callbacks.Plugin):
     """Image/video generation: !pic, !picnsfw, !video, !videonsfw."""
 
     threaded = True
-    _prov_lock = threading.Lock()
 
     # ------------------------------------------------------------------ helpers
 
@@ -235,6 +228,9 @@ class Create(callbacks.Plugin):
         api_key = os.environ.get("RUNWARE_API_KEY")
         if not api_key:
             raise CreateError("RUNWARE_API_KEY not set")
+        # Ultra has no 1MP mode — bump the default 1024² up to a 4MP square.
+        if model == FLUX_ULTRA_MODEL and width == 1024 and height == 1024:
+            width, height = 2048, 2048
         task = {
             "taskType": "imageInference",
             "taskUUID": str(uuid.uuid4()),
@@ -251,6 +247,9 @@ class Create(callbacks.Plugin):
             # instruction edit (FLUX Kontext): edits these image(s). Kontext
             # rejects steps/CFGScale (error unsupportedArchitectureCFGScale).
             task["referenceImages"] = reference_images
+        elif model == FLUX_ULTRA_MODEL:
+            # FLUX1.1 [pro] Ultra: like Kontext, rejects steps/CFGScale.
+            pass
         else:
             # SDXL/Flux text-to-image, or img2img when seed_image is given (the
             # uncensored !picnsfw edit fallback); both take steps/CFGScale.
@@ -502,19 +501,28 @@ class Create(callbacks.Plugin):
             self.log.warning("Create: video re-host failed (%s), posting original URL", e)
             return video_url
 
-    def _atlas_i2v(self, prompt, image_url, timeout):
+    def _vmodel(self, msg, irc, key):
+        """Configured Atlas video model for !video/!videonsfw, with a safe
+        fallback if the (newish) config key isn't registered yet."""
+        default = VIDEO_NSFW_MODEL_DEFAULT if key == "videoNsfwModel" else VIDEO_MODEL_DEFAULT
+        try:
+            return self.registryValue(key, msg.channel, irc.network)
+        except Exception:
+            return default
+
+    def _atlas_i2v(self, prompt, image_url, timeout, model=ATLAS_I2V_MODEL):
         """Generate a video via Atlas I2V, then re-host it on Zipline for inline
         browser playback (falls back to the raw Atlas URL if re-hosting fails)."""
-        url = self._atlas_i2v_raw(prompt, image_url, timeout)
+        url = self._atlas_i2v_raw(prompt, image_url, timeout, model)
         return self._rehost_video(url, timeout)
 
-    def _atlas_i2v_raw(self, prompt, image_url, timeout):
+    def _atlas_i2v_raw(self, prompt, image_url, timeout, model=ATLAS_I2V_MODEL):
         import time
         api_key = os.environ.get("ATLASCLOUD_API_KEY")
         if not api_key:
             raise CreateError("ATLASCLOUD_API_KEY not set")
         payload = {
-            "model": ATLAS_I2V_MODEL,
+            "model": model,
             "prompt": prompt,
             "image": image_url,
             "duration": 5,
@@ -875,102 +883,10 @@ class Create(callbacks.Plugin):
             "invalidprovidercontent", "invalidbflcontent",
             "moderation", "flagged", "invalid content"))
 
-    def _caption_image(self, raw, mime, timeout):
-        """Caption a seed image via Gemini vision — a concise SFW scene
-        description (no clothing) used to anchor an img2img edit so it doesn't
-        drift the composition/background. Returns the caption, or None."""
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            return None
-        body = {"contents": [{"parts": [
-            {"text": CAPTION_PROMPT},
-            {"inline_data": {"mime_type": mime or "image/png",
-                             "data": base64.b64encode(raw).decode("ascii")}},
-        ]}]}
-        req = urllib.request.Request(
-            GEMINI_CAPTION_ENDPOINT + "?key=" + api_key,
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"}, method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                j = json.loads(resp.read().decode("utf-8"))
-        except Exception as e:
-            self.log.warning("Create: caption failed (%s)", e)
-            return None
-        try:
-            cands = j.get("candidates") or []
-            if not cands:
-                return None
-            parts = (cands[0].get("content") or {}).get("parts") or []
-            text = "".join(p.get("text", "") for p in parts)
-            text = text.strip().strip('"').replace("\n", " ").strip()
-            return text or None
-        except Exception:
-            return None
-
     @staticmethod
     def _is_undress(instruction):
         s = (instruction or "").lower()
         return any(w in s for w in NUDE_HINT_WORDS)
-
-    # ----------------------------------------------------- provenance (gate)
-
-    def _provenance_path(self):
-        try:
-            base = conf.supybot.directories.data()
-        except Exception:
-            base = "/home/botuser/runbot/data"
-        return os.path.join(base, "Create_provenance.json")
-
-    def _zid_from_url(self, url):
-        """Zipline file id from one of OUR public image URLs, else None."""
-        base = os.environ.get("ZIPLINE_PUBLIC_BASE") or ""
-        if not base or not url or not url.startswith(base):
-            return None
-        seg = urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1]
-        return (seg.split(".", 1)[0] or None) if seg else None
-
-    def _record_provenance(self, url, prompt, kind):
-        """Mark an image WE generated as synthetic (keyed by its Zipline id)."""
-        import time
-        zid = self._zid_from_url(url)
-        if not zid:
-            return
-        path = self._provenance_path()
-        with self._prov_lock:
-            try:
-                with open(path) as f:
-                    data = json.load(f)
-                if not isinstance(data, dict):
-                    data = {}
-            except Exception:
-                data = {}
-            data[zid] = {"prompt": (prompt or "")[:500], "kind": kind, "ts": int(time.time())}
-            if len(data) > PROVENANCE_MAX:
-                newest = sorted(data.items(), key=lambda kv: kv[1].get("ts", 0),
-                                reverse=True)[:PROVENANCE_MAX]
-                data = dict(newest)
-            try:
-                tmp = path + ".tmp"
-                with open(tmp, "w") as f:
-                    json.dump(data, f)
-                os.replace(tmp, path)
-            except Exception as e:
-                self.log.warning("Create: provenance write failed (%s)", e)
-
-    def _seed_is_synthetic(self, url):
-        """True only if `url` is an image this bot generated (gate for undress)."""
-        zid = self._zid_from_url(url)
-        if not zid:
-            return False
-        with self._prov_lock:
-            try:
-                with open(self._provenance_path()) as f:
-                    data = json.load(f)
-            except Exception:
-                return False
-        return isinstance(data, dict) and zid in data
 
     # ------------------------------------------------ per-image edit analysis
 
@@ -1018,9 +934,9 @@ class Create(callbacks.Plugin):
         return self._parse_analysis(result.stdout)
 
     def _analyze_seed(self, raw, mime, timeout):
-        """Tailored SFW edit options for the seed: the local Claude CLI (vision) first,
-        Gemini caption as fallback, else None. The undress instruction is NEVER
-        sent here — this step only describes the scene."""
+        """Tailored SFW edit options for the seed via the local Claude CLI (vision),
+        else None. The undress instruction is NEVER sent here — this step only
+        describes the scene."""
         ext = self._ext_for_mime(mime)
         path = None
         try:
@@ -1038,8 +954,7 @@ class Create(callbacks.Plugin):
                     os.unlink(path)
                 except Exception:
                     pass
-        cap = self._caption_image(raw, mime, timeout)
-        return {"caption": cap} if cap else None
+        return None
 
     def _edit_pic_gemini(self, irc, msg, url, instruction, timeout):
         """!pic <url> <edit>: SFW instruction edit via Gemini → Zipline."""
@@ -1060,7 +975,6 @@ class Create(callbacks.Plugin):
         try:
             raw, mime = self._gemini_image(edit_instruction, timeout, image=(data, ct))
             out = self._zipline_upload(raw, mime, timeout)
-            self._record_provenance(out, "edit:" + instruction, "pic-edit")
             irc.reply(self._shorten(out), prefixNick=False)
             return
         except GeminiRefusal as e:
@@ -1089,12 +1003,6 @@ class Create(callbacks.Plugin):
             irc.error("tell me what to change, e.g. !picnsfw <url> take their clothes off")
             return
         undress = self._is_undress(instruction)
-        # GATE: undress edits run ONLY on images this bot generated itself
-        # (synthetic subjects), never on an arbitrary uploaded photo.
-        if undress and not self._seed_is_synthetic(url):
-            irc.error("undress edits only work on images I made with !pic — "
-                      "generate one first, then edit that link.")
-            return
         try:
             data, ct = self._download_image(url)
         except CreateError as e:
@@ -1103,7 +1011,7 @@ class Create(callbacks.Plugin):
             return
         if ct == "image/jpg":
             ct = "image/jpeg"
-        # Per-image SFW analysis (the local Claude CLI vision; Gemini caption fallback).
+        # Per-image SFW analysis (the local Claude CLI vision).
         analysis = self._analyze_seed(data, ct, timeout) or {}
         caption = analysis.get("caption")
         neg_extra = analysis.get("negatives")
@@ -1117,15 +1025,26 @@ class Create(callbacks.Plugin):
             strength = float(analysis.get("strength"))
         except (TypeError, ValueError):
             strength = cfg_strength
-        strength = max(0.35, min(0.75, strength))
+        if undress:
+            # Undressing needs heavy denoising. The vision analysis deliberately
+            # recommends a LOW strength for a single clear subject (great for SFW
+            # fidelity) which leaves the clothing structurally intact. Force a
+            # high floor so the clothes are actually removed.
+            strength = max(0.80, min(0.88, strength))
+        else:
+            strength = max(0.35, min(0.75, strength))
         # Build a compact positive (mind SDXL's ~77-token CLIP window): scene
         # anchor + user intent + (code-appended) nudity boosters for undress.
         parts = []
         if caption:
-            parts.append(str(caption)[:240])
-        parts.append(instruction)
+            parts.append(str(caption)[:180])
         if undress:
-            parts.append("completely nude, fully naked, bare skin, natural skin")
+            # Front-load orientation-NEUTRAL nudity terms (SDXL weights earlier
+            # tokens more). Which view (full frontal vs from behind) is left to
+            # the user's instruction below; we don't bias it here.
+            parts.append("completely nude, fully naked, nude body, bare skin, "
+                         "no clothes, undressed, naked body fully visible")
+        parts.append(instruction)
         parts.append("photorealistic, detailed, same composition and framing")
         positive = ", ".join(parts)
         neg_terms = [EDIT_NEG_BASE] + [str(n) for n in neg_extra if n]
@@ -1138,6 +1057,9 @@ class Create(callbacks.Plugin):
         # Uncensored Lustify SDXL img2img (the only path that actually does NSFW).
         nmodel = self.registryValue("editFallbackModel", msg.channel, irc.network)
         sw, sh = self._target_dims(*dims) if dims else (1024, 1024)
+        self.log.info("Create.picnsfw undress=%s strength=%.2f model=%s "
+                      "pos=%r neg=%r", undress, strength, nmodel,
+                      positive[:220], negative[:160])
         try:
             out = self._runware_image(positive, nmodel, timeout,
                                       width=sw, height=sh,
@@ -1148,8 +1070,6 @@ class Create(callbacks.Plugin):
             irc.error(str(e))
             return
         out = self._rehost_image(out, timeout)
-        # The result is itself a bot-generated synthetic image — allow chaining.
-        self._record_provenance(out, "edit:" + instruction, "picnsfw-edit")
         irc.reply(NSFW_PREFIX + " " + self._shorten(out), prefixNick=False)
 
     def _check_cap(self, irc, msg, cap_name):
@@ -1223,42 +1143,22 @@ class Create(callbacks.Plugin):
         if seed_url:
             self._edit_pic_gemini(irc, msg, seed_url, instruction, timeout)
             return
-        # Text-to-image path.
+        # Text-to-image path: Runware (picModel, default FLUX1.1 [pro] Ultra),
+        # re-hosted on Zipline so it persists and gets a provenance record (so
+        # !picnsfw <url> undress edits stay gated to bot-generated seeds).
         original = prompt
         prompt = self._expand_prompt(original)
         self._display_prompt(irc, prompt, original)
-        # Attempt 1: Gemini → Zipline.
+        pic_model = self.registryValue("picModel", msg.channel, irc.network)
         try:
-            url = self._gemini_to_zipline(prompt, timeout)
-            self._record_provenance(url, original, "pic")
-            irc.reply(self._shorten(url), prefixNick=False)
-            return
-        except GeminiRefusal as e:
-            self.log.info("Create.pic gemini refused: %s — retrying toned-down", e)
+            runware_url = self._runware_image(prompt, pic_model, timeout)
+            raw, mime = self._download_image(runware_url)
+            url = self._zipline_upload(raw, mime, timeout)
         except CreateError as e:
-            # Transient / infrastructure error (HTTP 5xx, Zipline down, etc.).
-            self.log.warning("Create.pic gemini/zipline error: %s", e)
+            self.log.warning("Create.pic runware/zipline error: %s", e)
             irc.error("image generation failed (%s) — try again in a moment" % e)
             return
-        # Attempt 2: re-expand the original with an SFW nudge and retry.
-        irc.reply("gemini declined that — retrying with a tamer take…", prefixNick=False)
-        retry_prompt = self._expand_prompt(original + SFW_RETRY_HINT)
-        self._display_prompt(irc, retry_prompt, original)
-        try:
-            url = self._gemini_to_zipline(retry_prompt, timeout)
-            self._record_provenance(url, original, "pic")
-            irc.reply(self._shorten(url), prefixNick=False)
-            return
-        except GeminiRefusal as e:
-            self.log.info("Create.pic gemini refused on retry: %s", e)
-            irc.reply(
-                "gemini won't generate this prompt (declined twice). "
-                "try again or reword it a bit — or use !picnsfw for spicy stuff.",
-                prefixNick=False,
-            )
-        except CreateError as e:
-            self.log.warning("Create.pic gemini/zipline error on retry: %s", e)
-            irc.error("image generation failed (%s) — try again in a moment" % e)
+        irc.reply(self._shorten(url), prefixNick=False)
 
     pic = wrap(pic, ["public", "text"])
 
@@ -1335,7 +1235,9 @@ class Create(callbacks.Plugin):
             image_url = self._resolve_url(seed_url)
             irc.reply("seed: " + self._shorten(image_url), prefixNick=False)
             try:
-                video_url = self._atlas_i2v(motion, image_url, video_timeout)
+                video_url = self._atlas_i2v(
+                    motion, image_url, video_timeout,
+                    self._vmodel(msg, irc, "videoModel"))
             except CreateError as e:
                 self.log.warning("Create.video video: %s", e)
                 irc.error("video step: " + str(e))
@@ -1355,7 +1257,9 @@ class Create(callbacks.Plugin):
             return
         irc.reply("seed: " + self._shorten(image_url), prefixNick=False)
         try:
-            video_url = self._atlas_i2v(prompt, image_url, video_timeout)
+            video_url = self._atlas_i2v(
+                prompt, image_url, video_timeout,
+                self._vmodel(msg, irc, "videoModel"))
         except CreateError as e:
             self.log.warning("Create.video video: %s", e)
             irc.error("video step: " + str(e))
@@ -1384,7 +1288,9 @@ class Create(callbacks.Plugin):
             image_url = self._resolve_url(seed_url)
             irc.reply(NSFW_PREFIX + " seed: " + self._shorten(image_url), prefixNick=False)
             try:
-                video_url = self._atlas_i2v(motion, image_url, video_timeout)
+                video_url = self._atlas_i2v(
+                    motion, image_url, video_timeout,
+                    self._vmodel(msg, irc, "videoNsfwModel"))
             except CreateError as e:
                 self.log.warning("Create.videonsfw video: %s", e)
                 irc.error("video step: " + str(e))
@@ -1404,7 +1310,9 @@ class Create(callbacks.Plugin):
             return
         irc.reply(NSFW_PREFIX + " seed: " + self._shorten(image_url), prefixNick=False)
         try:
-            video_url = self._atlas_i2v(prompt, image_url, video_timeout)
+            video_url = self._atlas_i2v(
+                prompt, image_url, video_timeout,
+                self._vmodel(msg, irc, "videoNsfwModel"))
         except CreateError as e:
             self.log.warning("Create.videonsfw video: %s", e)
             irc.error("video step: " + str(e))

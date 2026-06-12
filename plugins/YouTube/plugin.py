@@ -20,8 +20,6 @@ import shutil
 import tempfile
 import subprocess
 import threading
-import urllib.request
-import urllib.error
 
 import supybot.conf as conf
 import supybot.ircdb as ircdb
@@ -308,44 +306,44 @@ class YouTube(callbacks.PluginRegexp):
         return table.get((mime or '').lower().split(';')[0].strip(), 'mp4')
 
     def _zipline_upload_file(self, path, mime, timeout):
-        """Upload a local file to Zipline. Returns the public URL."""
+        """Upload a local file to Zipline via curl. Returns the public URL.
+
+        curl streams the file from disk, so an arbitrarily large video is
+        never read into the bot's address space (urllib's multipart body
+        would buffer the whole file in RAM and could OOM-kill the bot).
+        """
         token = os.environ.get('ZIPLINE_TOKEN')
         endpoint = os.environ.get('ZIPLINE_UPLOAD_URL')
         if not token or not endpoint:
             raise RuntimeError('ZIPLINE_TOKEN/ZIPLINE_UPLOAD_URL not set')
         ext = self._ext_for_mime(mime)
-        with open(path, 'rb') as fh:
-            raw = fh.read()
-        boundary = '----fatbot' + uuid.uuid4().hex
         fname = uuid.uuid4().hex + '.' + ext
-        head = (
-            '--' + boundary + '\r\n'
-            'Content-Disposition: form-data; name="file"; filename="%s"\r\n'
-            'Content-Type: %s\r\n\r\n' % (fname, mime or 'video/mp4')
-        ).encode('utf-8')
-        tail = ('\r\n--' + boundary + '--\r\n').encode('utf-8')
-        data = head + raw + tail
+        cmd = [
+            'curl', '-s', '-X', 'POST',
+            '-H', 'authorization: ' + token,
+            '-F', 'file=@%s;filename=%s;type=%s' % (
+                path, fname, mime or 'video/mp4'),
+        ]
         host = os.environ.get('ZIPLINE_HOST')
-        headers = {
-            'authorization': token,
-            'content-type': 'multipart/form-data; boundary=' + boundary,
-        }
         if host:
-            headers['Host'] = host
-        req = urllib.request.Request(
-            endpoint, data=data, headers=headers, method='POST')
+            cmd += ['-H', 'Host: ' + host]
+        cmd.append(endpoint)
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                j = json.loads(resp.read().decode('utf-8'))
-        except urllib.error.HTTPError as e:
-            detail = ''
-            try:
-                detail = e.read().decode('utf-8', 'replace')[:200]
-            except Exception:
-                pass
-            raise RuntimeError('zipline http %d: %s' % (e.code, detail))
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError('zipline upload timed out')
         except Exception as e:
             raise RuntimeError('zipline upload failed: %s' % e)
+        if r.returncode != 0:
+            raise RuntimeError(
+                'zipline curl exit %d: %s' % (r.returncode,
+                                              (r.stderr or '')[:200]))
+        try:
+            j = json.loads(r.stdout)
+        except ValueError:
+            raise RuntimeError(
+                'zipline bad response: %s' % (r.stdout or '')[:200])
         files = j.get('files') or []
         if not files or 'url' not in files[0]:
             raise RuntimeError(

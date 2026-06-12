@@ -46,11 +46,11 @@ _CONF = _load_conf(os.path.join(os.path.dirname(__file__), 'wikibear.conf'))
 
 CLAUDE_BIN        = _CONF.get('CLAUDE_BIN',        '/home/botuser/.local/bin/claude')
 CLAUDE_CONFIG_DIR = _CONF.get('CLAUDE_CONFIG_DIR', '/home/botuser/runbot/.claude')
-CLAUDE_MODEL      = _CONF.get('MODEL',             'claude-opus-4-8')
+CLAUDE_MODEL      = _CONF.get('MODEL',             'claude-sonnet-4-6')
 BOT_HOME          = _CONF.get('HOME',              '/home/botuser')
 SIGNOFF = "I'm wikibeaaaaaaaaaaar!!"
 MAX_CHARS = 420
-MAX_LINES = 6
+MAX_LINES = 8
 # Matches the signoff in any drawl/spacing variant so it can be peeled off
 # the model output before re-flow and re-attached exactly once on its own line.
 SIGNOFF_RE = re.compile(r"(?i)\bi['’]?m\s+wiki\s*bea+r+[\s!.]*")
@@ -104,7 +104,7 @@ SYSTEM_PROMPT_NOARG = (
     "detail — names, dates, body counts, exact methods, the smell of "
     "it. Don't skim the horror; savour it. Then end with "
     f"'{SIGNOFF}' on its own line.\n\n"
-    "Hard rules: 2-6 IRC messages total — aim for the fuller treatment, "
+    "Hard rules: 2-8 IRC messages total — aim for the fuller treatment, "
     "not the one-liner. Prefer 4-5 messages when there's enough material. "
     f"The closing line '{SIGNOFF}' is MANDATORY and must always appear "
     "as the final line on its own; if you run out of room, use a 6th "
@@ -127,7 +127,7 @@ SYSTEM_PROMPT_QUESTION = (
     "concrete grisly detail (names, dates, body counts, methods, the "
     "smell of it); savour the horror, don't skim it. Blank line, "
     f"'{SIGNOFF}' on its own line.\n\n"
-    "Hard rules: 2-6 IRC messages total — aim for the fuller treatment, "
+    "Hard rules: 2-8 IRC messages total — aim for the fuller treatment, "
     "not the one-liner. Prefer 4-5 messages when there's enough material. "
     f"The closing line '{SIGNOFF}' is MANDATORY and must always appear "
     "as the final line on its own; if you run out of room, use a 6th "

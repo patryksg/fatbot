@@ -1,4 +1,4 @@
-version = '2026.05.29+fat'
+version = '2026.06.13+fat'
 try:
     import supybot.utils.python
     supybot.utils.python._debug_software_version = version

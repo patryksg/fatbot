@@ -21,8 +21,18 @@ conf.registerGlobalValue(Create, 'videoTimeoutSec',
         'Total time to wait for video generation (Atlas/fal) to finish.'))
 
 conf.registerChannelValue(Create, 'picModel',
-    registry.String('bfl:3@1',
-        'Runware model id for !pic and seed image of !video (default: Flux Pro, high quality).'))
+    registry.String('bfl:2@2',
+        'Runware model id for !pic and the seed image of !video '
+        '(default: FLUX1.1 [pro] Ultra, 4MP).'))
+
+conf.registerChannelValue(Create, 'videoModel',
+    registry.String('bytedance/seedance-2.0/image-to-video',
+        'Atlas image-to-video model id for !video (default: Seedance 2.0).'))
+
+conf.registerChannelValue(Create, 'videoNsfwModel',
+    registry.String('atlascloud/wan-2.2-turbo-spicy/image-to-video',
+        'Atlas image-to-video model id for !videonsfw (default: Wan 2.2 '
+        'turbo-spicy, uncensored).'))
 
 conf.registerChannelValue(Create, 'editModel',
     registry.String('bfl:3@1',

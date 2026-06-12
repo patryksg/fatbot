@@ -294,6 +294,42 @@ def _walk_redirects(url, *, timeout, max_bytes, referer=None, cookies_file=None,
     return None
 
 
+_REDDIT_SHARE_PATH_RE = re.compile(r'^/r/[A-Za-z0-9_]+/s/', re.IGNORECASE)
+
+
+def _resolve_reddit_share(url, timeout):
+    """Resolve a reddit /s/ share link to its canonical post URL.
+
+    Share tokens only resolve on www.reddit.com (old.reddit 302s them to a
+    bogus /submit page), but the www hop sets fresh session cookies that make
+    old.reddit 403 every later request carrying them. So the redirect is
+    resolved on a throwaway session whose cookies are discarded, keeping the
+    shared jar clean. Tries direct, then WARP. Returns the absolute target
+    URL or None."""
+    if not _HAVE_CURLCFFI:
+        return None
+    for force_warp in (False, True):
+        try:
+            with cc.Session(impersonate=_IMPERSONATE) as s:
+                kw = dict(timeout=timeout, allow_redirects=False, stream=True)
+                if force_warp:
+                    kw['proxies'] = _WARP_PROXIES
+                r = s.get(url, **kw)
+                try:
+                    status = r.status_code
+                    loc = r.headers.get('Location') or r.headers.get('location')
+                finally:
+                    try:
+                        r.close()
+                    except Exception:
+                        pass
+            if status in (301, 302, 303, 307, 308) and loc:
+                return urllib.parse.urljoin(url, loc)
+        except Exception:
+            continue
+    return None
+
+
 def _rewrite_for_fetch(url):
     """Transparently rewrite some hosts to a variant that returns a
     <title>-bearing page within our maxBytes budget."""
@@ -1133,6 +1169,12 @@ def fetch_title(url, *, timeout=6.0, max_bytes=262144, user_agent=None,
     tweet = _fetch_tweet_via_fxapi(url, timeout=timeout)
     if tweet is not None:
         return tweet
+    _p = urllib.parse.urlsplit(url)
+    if ((_p.hostname or '').lower() in ('www.reddit.com', 'reddit.com')
+            and _REDDIT_SHARE_PATH_RE.match(_p.path or '')):
+        resolved = _resolve_reddit_share(url, timeout)
+        if resolved:
+            url = resolved
     url = _rewrite_for_fetch(url)
     parsed_init = urllib.parse.urlsplit(url)
     if parsed_init.scheme not in ('http', 'https'):

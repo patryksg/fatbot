@@ -1,19 +1,15 @@
 """
-Ash: !ashnormal / !ashsmart / !ashgem — Bruce Campbell's Ash Williams
+Ash: !ashnormal / !ashsmart — Bruce Campbell's Ash Williams
 (Evil Dead / Army of Darkness / Ash vs Evil Dead) drops in-character lines.
-Three tiers gated on separate per-user channel-caps.
+Two tiers gated on separate per-user channel-caps.
 
   ashnormal  -> Claude Haiku (cheap, fast)
-  ashsmart   -> Claude Opus (smart)
-  ashgem     -> Gemini Flash (cheaper than Claude)
+  ashsmart   -> Claude Haiku (same for now; bump MODEL_SMART to re-split tiers)
 """
 
-import json
 import os
 import re
 import subprocess
-import urllib.request
-import urllib.error
 
 import supybot.ircdb as ircdb
 import supybot.callbacks as callbacks
@@ -21,19 +17,13 @@ from supybot.commands import wrap, optional
 
 CLAUDE_BIN = "/home/botuser/.local/bin/claude"
 CLAUDE_CONFIG_DIR = "/home/botuser/runbot/.claude"
-MODEL_NORMAL = "claude-opus-4-8"
-MODEL_SMART = "claude-opus-4-8"
-GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_ENDPOINT = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    f"{GEMINI_MODEL}:generateContent"
-)
+MODEL_NORMAL = "claude-haiku-4-5-20251001"
+MODEL_SMART = "claude-haiku-4-5-20251001"
 TIMEOUT_SEC = 120
-GEMINI_TIMEOUT_SEC = 60
-MAX_LINES = 6
+MAX_LINES = 8
 MAX_CHARS = 420
 
-CAPS = {"normal": "ashnormal", "smart": "ashsmart", "gem": "ashgem"}
+CAPS = {"normal": "ashnormal", "smart": "ashsmart"}
 
 PERSONALITY = (
     "You are Ash Williams — Bruce Campbell's character from the Evil Dead "
@@ -67,7 +57,7 @@ SYSTEM_PROMPT_NOARG = (
     "\n\nTask: deliver one in-character Ash moment — a quip, a brag, a "
     "threat, a chainsaw-revving boast, a complaint about deadites, a tall "
     "tale about your S-Mart heroism, a pickup line, whatever lands. "
-    "Punchy, like a Bruce Campbell line read. 1-6 IRC lines, each under "
+    "Punchy, like a Bruce Campbell line read. 1-8 IRC lines, each under "
     "380 chars. No preamble, no 'Ash:', no quote marks around your line, "
     "no narration."
 )
@@ -77,7 +67,7 @@ SYSTEM_PROMPT_QUESTION = (
     "\n\nTask: the user asked Ash something. Answer fully in character. "
     "Stay in the bit even for serious factual questions — Ash bullshits "
     "through anything with swagger and gets there mostly by accident. "
-    "If it's banter or a what-if scenario, banter harder. 1-6 IRC lines, "
+    "If it's banter or a what-if scenario, banter harder. 1-8 IRC lines, "
     "each under 380 chars. Plain text only. No AI disclaimers, no "
     "breaking character, no stage directions, no asterisks."
 )
@@ -188,44 +178,8 @@ def _ask_claude(model, system_prompt, question):
     return (r.stdout or "").strip(), None
 
 
-def _ask_gemini(system_prompt, question):
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        return None, "GEMINI_API_KEY not set"
-    body = {
-        "systemInstruction": {"parts": [{"text": system_prompt}]},
-        "contents": [{
-            "role": "user",
-            "parts": [{"text": question or "go"}],
-        }],
-        "generationConfig": {
-            "temperature": 0.85,
-            "maxOutputTokens": 900,
-        },
-    }
-    req = urllib.request.Request(
-        f"{GEMINI_ENDPOINT}?key={api_key}",
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT_SEC) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        return None, f"gemini HTTP {e.code}"
-    except Exception as e:
-        return None, f"gemini: {str(e)[:200]}"
-    candidates = payload.get("candidates") or []
-    if not candidates:
-        return None, "gemini: no candidates"
-    parts = candidates[0].get("content", {}).get("parts") or []
-    text = "".join(p.get("text", "") for p in parts).strip()
-    return text, None
-
-
 class Ash(callbacks.Plugin):
-    """!ashnormal/!ashsmart/!ashgem — Ash Williams from Evil Dead, in character."""
+    """!ashnormal/!ashsmart — Ash Williams from Evil Dead, in character."""
 
     threaded = True
 
@@ -234,9 +188,7 @@ class Ash(callbacks.Plugin):
         if not _check_cap(irc, msg, cap_name):
             return
         system_prompt = SYSTEM_PROMPT_QUESTION if question else SYSTEM_PROMPT_NOARG
-        if mode == "gem":
-            text, err = _ask_gemini(system_prompt, question)
-        elif mode == "smart":
+        if mode == "smart":
             text, err = _ask_claude(MODEL_SMART, system_prompt, question)
         else:
             text, err = _ask_claude(MODEL_NORMAL, system_prompt, question)
@@ -260,14 +212,9 @@ class Ash(callbacks.Plugin):
     ashnormal = wrap(ashnormal, ["public", optional("text")])
 
     def ashsmart(self, irc, msg, args, question):
-        """[<question>] — Ash answers via Claude opus (smart)."""
+        """[<question>] — Ash answers via Claude (smart tier)."""
         self._run(irc, msg, question, "smart")
     ashsmart = wrap(ashsmart, ["public", optional("text")])
-
-    def ashgem(self, irc, msg, args, question):
-        """[<question>] — Ash answers via Gemini Flash (cheap)."""
-        self._run(irc, msg, question, "gem")
-    ashgem = wrap(ashgem, ["public", optional("text")])
 
 
 Class = Ash
