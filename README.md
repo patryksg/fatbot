@@ -127,7 +127,7 @@ those aren't rewritten:
 
 ```
 rm -rf plugins/<Name>/__pycache__
-systemctl restart fatbot     # or `!reload <Name>` from IRC
+systemctl restart fatbot     # or `!reload <Name>` / `!rl` (Reload plugin) from IRC
 ```
 
 ## Plugins
@@ -143,12 +143,14 @@ ChannelLogger (stock) is also loaded but does not appear in the
 
 Custom plugins currently installed:
 
-- **Claude** — Claude-CLI-backed chat / Q&A (`!claude` / `!smart` / `!gem`
-  modes) with a per-channel "brain" recall and a Gemini fallback. Exposes a
-  small MCP tool suite to the model: an image viewer, a URL fetcher, YouTube
-  transcript/download tools, and a Reddit-video analyzer (Gemini Files API,
-  with optional rehosting on the Zipline image host). See
-  [Claude plugin security](#claude-plugin-security)
+- **Claude** — Claude-CLI-backed chat / Q&A, asked by addressing the bot by
+  nick; `!claude`/`!haiku` (default, cheap) and `!fable` (top model,
+  `--effort max`, expensive) switch the per-channel mode. Per-channel "brain"
+  recall. The Gemini chat fallback was removed 2026-06-13 — Gemini is only
+  used by the MCP video tools. Exposes a small MCP tool suite to the model:
+  an image viewer, a URL fetcher, YouTube transcript/download tools, and a
+  Reddit-video analyzer (Gemini Files API, with optional rehosting on the
+  Zipline image host). See [Claude plugin security](#claude-plugin-security)
 - **Create** — image / video generation (`!pic` / `!picnsfw` / `!video` /
   `!videonsfw`) via Gemini and Runware, rehosted on a Zipline image host;
   channel-gated by a `generative` capability
@@ -168,6 +170,9 @@ Custom plugins currently installed:
 - **YouTube** — yt-dlp-backed metadata snarfer, plus `!ytdl <url>` which
   downloads a video and rehosts it on the Zipline image host (gated by a
   per-channel `ytdl` capability)
+- **Reload** — `!rl` batch-reloads every plugin listed in
+  `supybot.plugins.Reload.plugins` in one shot (owner-only); stock `reload`
+  only takes one plugin at a time
 - **Ash** — Evil-Dead "Ash Williams" quote / persona responder
 - **Wikibear** — creepy-cheerful Wikipedia fact responder
 - **Relay** — relays public messages between two channels
