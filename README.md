@@ -170,6 +170,9 @@ Custom plugins currently installed:
 - **YouTube** — yt-dlp-backed metadata snarfer, plus `!ytdl <url>` which
   downloads a video and rehosts it on the Zipline image host (gated by a
   per-channel `ytdl` capability)
+- **SportsNews** — `!sports <league>` posts the top 3 ESPN headlines for a
+  league (17 supported: nfl, nba, mlb, nhl, epl, laliga, ucl, ufc, f1, …),
+  article URLs shortened via ShrinkUrl
 - **Reload** — `!rl` batch-reloads every plugin listed in
   `supybot.plugins.Reload.plugins` in one shot (owner-only); stock `reload`
   only takes one plugin at a time
